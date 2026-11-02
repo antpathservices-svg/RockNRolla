@@ -1,0 +1,10 @@
+{
+  "name": "Rock N Rolla Cakes · Pedidos",
+  "short_name": "RNR Pedidos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf8f7",
+  "theme_color": "#202020",
+  "lang": "es-MX",
+  "icons": [{ "src": "/logo.png", "sizes": "240x240", "type": "image/png" }]
+}

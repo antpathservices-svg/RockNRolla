@@ -1,0 +1,23 @@
+{
+  "name": "rnr-plataforma",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Plataforma de pedidos de Rock N Rolla Cakes: chats de WhatsApp, pedido con IA, nota en PDF y Google Calendar",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w server && npm run build -w web",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "migrate": "npm run migrate -w server",
+    "test": "npm run test -w packages/shared && npm run test -w server",
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
