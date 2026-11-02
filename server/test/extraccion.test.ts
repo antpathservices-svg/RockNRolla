@@ -129,3 +129,34 @@ describe('OpenRouter gratuito', () => {
     await expect(ex.extraer(MSGS)).rejects.toThrow('límite diario');
   });
 });
+
+describe('OpenRouter con enrutador (openrouter/free)', () => {
+  const sinEndpoint = { status: 404, json: { error: { code: 404, message: 'No endpoints found that can handle the requested parameters.' } } };
+  const cfg = () => config({ OPENROUTER_API_KEY: 'k', OPENROUTER_MODEL: 'openrouter/free', OPENROUTER_DATA_COLLECTION: 'allow' });
+
+  it('si no acepta require_parameters, reintenta sin él y recuerda el modo', async () => {
+    const { f, llamadas } = fetchFalso({ 'openrouter.ai': [sinEndpoint, okOpenRouter(), okOpenRouter()] });
+    const ex = crearExtractor(cfg(), f, () => undefined);
+    expect(await ex.extraer(MSGS)).toEqual(EXT);
+    expect(llamadas[0].body.provider.require_parameters).toBe(true);
+    expect(llamadas[1].body.provider).toEqual({ data_collection: 'allow' });
+    expect(llamadas[1].body.messages[0].content).toContain('Responde SOLO con un objeto JSON');
+    await ex.extraer(MSGS); // segunda vez empieza en el modo que funcionó
+    expect(llamadas).toHaveLength(3);
+    expect(llamadas[2].body.provider).toEqual({ data_collection: 'allow' });
+  });
+
+  it('llega hasta pedir el JSON solo en el texto y lo extrae aunque traiga texto alrededor', async () => {
+    const { f, llamadas } = fetchFalso({ 'openrouter.ai': [sinEndpoint, sinEndpoint, sinEndpoint, okOpenRouter(`Claro, aquí está:\n${JSON.stringify(EXT)}\nSaludos`)] });
+    const ex = crearExtractor(cfg(), f, () => undefined);
+    expect(await ex.extraer(MSGS)).toEqual(EXT);
+    expect(llamadas[2].body.response_format).toEqual({ type: 'json_object' });
+    expect(llamadas[3].body.response_format).toBeUndefined();
+  });
+
+  it('no confunde ese 404 con la política de datos', async () => {
+    const { f } = fetchFalso({ 'openrouter.ai': [sinEndpoint, sinEndpoint, sinEndpoint, sinEndpoint] });
+    const ex = crearExtractor(config({ OPENROUTER_API_KEY: 'k', OPENROUTER_MODEL: 'openrouter/free' }), f, () => undefined);
+    await expect(ex.extraer(MSGS)).rejects.toThrow('requested parameters');
+  });
+});
