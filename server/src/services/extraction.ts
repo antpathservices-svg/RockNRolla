@@ -183,13 +183,13 @@ function proveedorClaude(config: Config, fetchImpl: typeof fetch): Proveedor | n
     async generar(transcripcion) {
       const data = await llamar({
         model: config.CLAUDE_MODEL,
-        max_tokens: 4000,
+        max_tokens: 8000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: transcripcion }],
         output_config: { format: { type: 'json_schema', schema: EXTRACCION_SCHEMA } },
       });
       if (data.stop_reason === 'refusal') throw new Error('El modelo no pudo procesar este chat.');
-      if (data.stop_reason === 'max_tokens') throw new Error('El chat es demasiado largo; elige un tramo más corto.');
+      if (data.stop_reason === 'max_tokens') throw new RespuestaCortada('La respuesta de Claude se cortó antes de terminar. Elige un tramo más corto del chat.');
       const text = (data.content ?? []).find((b: { type: string }) => b.type === 'text')?.text;
       if (!text) throw new Error('Claude no devolvió texto.');
       return text;
@@ -235,22 +235,31 @@ function proveedorOpenRouter(config: Config, fetchImpl: typeof fetch): Proveedor
       // se valida igual en el servidor con el esquema. El modo que funcionó se recuerda.
       for (let i = modoInicial; i < MODOS.length; i++) {
         const modo = MODOS[i];
-        try {
-          const data = await llamar({
-            model: config.OPENROUTER_MODEL,
-            max_tokens: 4000,
-            messages: [
-              { role: 'system', content: modo.esquemaEnPrompt ? `${SYSTEM_PROMPT}\n\n${INSTRUCCION_JSON}` : SYSTEM_PROMPT },
-              { role: 'user', content: transcripcion },
-            ],
-            ...(modo.responseFormat ? { response_format: modo.responseFormat } : {}),
-            provider: modo.requireParameters ? proveedor : { data_collection: dataCollection },
-          });
-          modoInicial = i;
-          return leerRespuesta(data);
-        } catch (e) {
-          const sinEndpoint = /can handle the requested parameters/i.test((e as Error).message);
-          if (!sinEndpoint || i === MODOS.length - 1) throw e;
+        // Los modelos de razonamiento gastan parte del límite pensando antes de responder.
+        // Si la respuesta se corta, se reintenta una vez con el doble de espacio.
+        for (let maxTokens = config.OPENROUTER_MAX_TOKENS; ; maxTokens *= 2) {
+          try {
+            const data = await llamar({
+              model: config.OPENROUTER_MODEL,
+              max_tokens: maxTokens,
+              messages: [
+                { role: 'system', content: modo.esquemaEnPrompt ? `${SYSTEM_PROMPT}\n\n${INSTRUCCION_JSON}` : SYSTEM_PROMPT },
+                { role: 'user', content: transcripcion },
+              ],
+              ...(modo.responseFormat ? { response_format: modo.responseFormat } : {}),
+              // Razonar poco y no devolver el razonamiento. No se manda en el modo estricto
+              // con require_parameters, porque descartaría los modelos que no razonan.
+              ...(modo.requireParameters ? {} : { reasoning: { effort: 'low', exclude: true } }),
+              provider: modo.requireParameters ? proveedor : { data_collection: dataCollection },
+            });
+            modoInicial = i;
+            return leerRespuesta(data);
+          } catch (e) {
+            if (e instanceof RespuestaCortada && maxTokens < config.OPENROUTER_MAX_TOKENS * 2) continue;
+            const sinEndpoint = /can handle the requested parameters/i.test((e as Error).message);
+            if (!sinEndpoint || i === MODOS.length - 1) throw e;
+            break;
+          }
         }
       }
       throw new Error('OpenRouter no aceptó la petición.');
@@ -268,12 +277,22 @@ const MODOS: Array<{ responseFormat: unknown; requireParameters: boolean; esquem
   { responseFormat: null, requireParameters: false, esquemaEnPrompt: true },
 ];
 
+/** La respuesta llegó incompleta porque se acabó el límite de tokens. */
+export class RespuestaCortada extends Error {}
+
 function leerRespuesta(data: any): string {
   // Un error durante la generación puede llegar con estado 200
   if (data.error) throw new Error(`OpenRouter: ${data.error.message ?? 'error desconocido'}`);
   const choice = data.choices?.[0];
   if (choice?.error) throw new Error(`OpenRouter: ${choice.error.message ?? 'error del modelo'}`);
-  if (choice?.finish_reason === 'length') throw new Error('El chat es demasiado largo; elige un tramo más corto.');
+  if (choice?.finish_reason === 'length') {
+    const razonamiento = data.usage?.completion_tokens_details?.reasoning_tokens;
+    throw new RespuestaCortada(
+      `La respuesta del modelo (${data.model ?? 'OpenRouter'}) se cortó antes de terminar` +
+        (razonamiento ? `: usó ${razonamiento} tokens razonando.` : '.') +
+        ' Intenta de nuevo, sube OPENROUTER_MAX_TOKENS o usa un modelo fijo en lugar de openrouter/free.',
+    );
+  }
   if (choice?.finish_reason === 'content_filter') throw new Error('El modelo no pudo procesar este chat.');
   const text: unknown = choice?.message?.content;
   if (typeof text !== 'string' || !text.trim()) throw new Error('OpenRouter no devolvió texto.');

@@ -26,6 +26,8 @@ const schema = z.object({
   // OpenRouter: otra vía a los modelos (Claude u otros) con una sola clave
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL: z.string().default('anthropic/claude-sonnet-5.5'),
+  // Límite de la respuesta (incluye el razonamiento de los modelos que razonan)
+  OPENROUTER_MAX_TOKENS: z.coerce.number().int().min(1000).max(64000).default(16000),
   // deny: solo proveedores que no guardan ni entrenan con los chats (recomendado con datos reales).
   // allow: necesario para modelos gratuitos como openrouter/free; solo para pruebas.
   OPENROUTER_DATA_COLLECTION: z.enum(['deny', 'allow']).default('deny'),
