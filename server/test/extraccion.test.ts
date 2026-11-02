@@ -160,3 +160,24 @@ describe('OpenRouter con enrutador (openrouter/free)', () => {
     await expect(ex.extraer(MSGS)).rejects.toThrow('requested parameters');
   });
 });
+
+describe('Respuesta cortada por el límite de tokens', () => {
+  const cortada = { status: 200, json: { model: 'x/modelo:free', choices: [{ finish_reason: 'length', message: { content: '{"resumen":"' } }], usage: { completion_tokens_details: { reasoning_tokens: 15800 } } } };
+  const cfg = () => config({ OPENROUTER_API_KEY: 'k', OPENROUTER_MODEL: 'openrouter/free', OPENROUTER_DATA_COLLECTION: 'allow' });
+
+  it('reintenta una vez con el doble de espacio y pide razonar poco', async () => {
+    const { f, llamadas } = fetchFalso({ 'openrouter.ai': [{ status: 404, json: { error: { message: 'No endpoints found that can handle the requested parameters.' } } }, cortada, okOpenRouter()] });
+    const ex = crearExtractor(cfg(), f, () => undefined);
+    expect(await ex.extraer(MSGS)).toEqual(EXT);
+    expect(llamadas[0].body.max_tokens).toBe(16000);
+    expect(llamadas[0].body.reasoning).toBeUndefined(); // modo estricto: sin reasoning
+    expect(llamadas[1].body.reasoning).toEqual({ effort: 'low', exclude: true });
+    expect(llamadas[2].body.max_tokens).toBe(32000);
+  });
+
+  it('si se vuelve a cortar, explica que fue el razonamiento', async () => {
+    const { f } = fetchFalso({ 'openrouter.ai': [cortada, cortada] });
+    const ex = crearExtractor(config({ OPENROUTER_API_KEY: 'k' }), f, () => undefined);
+    await expect(ex.extraer(MSGS)).rejects.toThrow('usó 15800 tokens razonando');
+  });
+});
