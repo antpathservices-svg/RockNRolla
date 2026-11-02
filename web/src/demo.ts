@@ -309,6 +309,8 @@ export const demoApi: Api = {
   conexiones: () => pausa({
     whatsapp: { estado: 'modo_prueba' as const, webhook: 'https://rnr.antpath.mx/webhook/whatsapp' },
     claude: { estado: 'sin_configurar' as const, modelo: 'claude-sonnet-5-5' },
+    openrouter: { estado: 'sin_configurar' as const, modelo: 'anthropic/claude-sonnet-5.5', permiteGuardarDatos: false },
+    modelos: [],
     calendario: { estado: 'sin_configurar' as const, calendarioId: null },
     login: { estado: 'conectado' as const },
     ultimoRespaldo: null,

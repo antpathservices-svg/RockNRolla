@@ -45,6 +45,14 @@ Agrega 2 GB de swap en el VPS como colchón (`fallocate -l 2G /swapfile`, etc.).
 4. `GOOGLE_SERVICE_ACCOUNT_JSON` (el JSON o el JSON en base64) y `GOOGLE_CALENDAR_ID` (normalmente el correo del dueño).
 5. En el panel: Configuración › Google Calendar › Probar conexión.
 
+## 4b. Modelos (Claude y OpenRouter)
+
+- Claude directo: `ANTHROPIC_API_KEY` de la consola de Anthropic (cuenta del cliente).
+- OpenRouter: en openrouter.ai › Keys crea una clave, recarga créditos y ponla en `OPENROUTER_API_KEY`.
+  El modelo por defecto es `anthropic/claude-sonnet-5.5`; se cambia con `OPENROUTER_MODEL`.
+- Con las dos, `LLM_PROVIDER` decide cuál va primero y el otro queda de respaldo.
+- En el panel: Configuración › Claude / OpenRouter › Probar conexión.
+
 ## 5. WhatsApp (cuando Meta dé de alta el número)
 
 1. Meta for Developers › app del cliente › WhatsApp › Configuración del webhook:

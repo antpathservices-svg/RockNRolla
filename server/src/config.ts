@@ -7,7 +7,9 @@ import { z } from 'zod';
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3000),
-  PUBLIC_URL: z.string().url().default('http://localhost:3000'),
+  // Solo el origen (https://dominio): una ruta pegada por error (p. ej. /entrar) rompería
+  // la dirección de regreso de Google y los links del cliente.
+  PUBLIC_URL: z.string().url().default('http://localhost:3000').transform((v) => new URL(v).origin),
   DATABASE_URL: z.string().min(1),
   SESSION_SECRET: z.string().regex(/^[0-9a-f]{64}$/i, 'SESSION_SECRET debe ser 64 caracteres hexadecimales (32 bytes)'),
   STORAGE_DIR: z.string().default('./storage'),
@@ -20,6 +22,20 @@ const schema = z.object({
 
   ANTHROPIC_API_KEY: z.string().optional(),
   CLAUDE_MODEL: z.string().default('claude-sonnet-5-5'),
+
+  // OpenRouter: otra vía a los modelos (Claude u otros) con una sola clave
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_MODEL: z.string().default('anthropic/claude-sonnet-5.5'),
+  // deny: solo proveedores que no guardan ni entrenan con los chats (recomendado con datos reales).
+  // allow: necesario para modelos gratuitos como openrouter/free; solo para pruebas.
+  OPENROUTER_DATA_COLLECTION: z.enum(['deny', 'allow']).default('deny'),
+  // Cuál usar primero cuando están las dos claves. Sin valor: Claude.
+  LLM_PROVIDER: z.enum(['claude', 'openrouter']).optional(),
+  // Si el primero falla (sin créditos, caído, respuesta inválida), intentar con el otro.
+  LLM_FALLBACK: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   GOOGLE_CALENDAR_ID: z.string().optional(),
@@ -47,6 +63,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
 export const has = {
   claude: (c: Config) => Boolean(c.ANTHROPIC_API_KEY),
+  openrouter: (c: Config) => Boolean(c.OPENROUTER_API_KEY),
   googleLogin: (c: Config) => Boolean(c.GOOGLE_CLIENT_ID && c.GOOGLE_CLIENT_SECRET),
   calendar: (c: Config) => Boolean(c.GOOGLE_SERVICE_ACCOUNT_JSON && c.GOOGLE_CALENDAR_ID),
   whatsapp: (c: Config) => Boolean(c.WHATSAPP_TOKEN && c.WHATSAPP_PHONE_NUMBER_ID && c.WHATSAPP_APP_SECRET),

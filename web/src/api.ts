@@ -56,6 +56,9 @@ type EstadoCon = 'conectado' | 'sin_configurar' | 'error' | 'modo_prueba';
 export interface Conexiones {
   whatsapp: { estado: EstadoCon; webhook: string };
   claude: { estado: EstadoCon; modelo: string };
+  openrouter: { estado: EstadoCon; modelo: string; permiteGuardarDatos: boolean };
+  /** Orden de uso: el primero es el principal y el segundo el respaldo. */
+  modelos: Array<'claude' | 'openrouter'>;
   calendario: { estado: EstadoCon; calendarioId: string | null };
   login: { estado: EstadoCon };
   ultimoRespaldo: string | null;

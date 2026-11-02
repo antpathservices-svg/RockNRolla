@@ -118,61 +118,182 @@ export function construirTranscripcion(mensajes: MensajeParaModelo[], hoyIso: st
   return `Fecha de hoy: ${hoyIso}\n\nChat:\n${lineas.join('\n')}`;
 }
 
-export interface Extractor {
-  extraer(mensajes: MensajeParaModelo[]): Promise<Extraccion>;
+export type NombreProveedor = 'claude' | 'openrouter';
+
+/** Un proveedor de modelo: recibe la transcripción y devuelve el JSON del pedido como texto. */
+interface Proveedor {
+  nombre: NombreProveedor;
+  modelo: string;
+  generar(transcripcion: string): Promise<string>;
   probar(): Promise<void>;
+}
+
+export interface Extractor {
+  /** Usa el proveedor principal y, si falla, el de respaldo (si está configurado). */
+  extraer(mensajes: MensajeParaModelo[]): Promise<Extraccion>;
+  /** Prueba un proveedor; sin nombre, el principal. */
+  probar(nombre?: NombreProveedor): Promise<void>;
   readonly disponible: boolean;
+  /** Proveedores configurados, en orden de uso. */
+  readonly proveedores: ReadonlyArray<{ nombre: NombreProveedor; modelo: string }>;
 }
 
 export class ExtractorNoDisponible extends Error {}
 
-export function crearExtractor(config: Config, fetchImpl: typeof fetch = fetch): Extractor {
-  const key = config.ANTHROPIC_API_KEY;
+const espera = (seg: number) => new Promise((r) => setTimeout(r, Math.min(seg, 30) * 1000));
 
-  async function llamar(body: unknown): Promise<any> {
-    if (!key) throw new ExtractorNoDisponible('Falta ANTHROPIC_API_KEY en el servidor.');
-    let intento = 0;
-    for (;;) {
-      const res = await fetchImpl('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) return res.json();
-      const text = await res.text();
-      // Tope mensual: no tiene caso reintentar (ver Referencias de APIs).
-      if (res.status === 429 && text.includes('enforced_spend_limit_reached')) {
-        throw new Error('Se llegó al tope mensual de gasto de Claude. Avísale a Antpath.');
-      }
-      if ((res.status === 429 || res.status >= 500) && intento < 3) {
-        const espera = Number(res.headers.get('retry-after')) || 2 ** intento;
-        await new Promise((r) => setTimeout(r, Math.min(espera, 30) * 1000));
-        intento++;
-        continue;
-      }
-      throw new Error(`Claude respondió ${res.status}: ${text.slice(0, 300)}`);
+/**
+ * POST con reintentos ante 408, 429 y 5xx (respeta Retry-After). `fatal` decide qué respuestas
+ * no vale la pena reintentar, como un tope de gasto o falta de créditos.
+ */
+async function postConReintentos(
+  fetchImpl: typeof fetch,
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  etiqueta: string,
+  fatal: (status: number, text: string) => string | null,
+): Promise<any> {
+  for (let intento = 0; ; intento++) {
+    const res = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    if (res.ok) return res.json();
+    const text = await res.text();
+    const mensajeFatal = fatal(res.status, text);
+    if (mensajeFatal) throw new Error(mensajeFatal);
+    if ((res.status === 408 || res.status === 429 || res.status >= 500) && intento < 2) {
+      await espera(Number(res.headers.get('retry-after')) || 2 ** intento);
+      continue;
     }
+    throw new Error(`${etiqueta} respondió ${res.status}: ${text.slice(0, 300)}`);
   }
+}
 
+function proveedorClaude(config: Config, fetchImpl: typeof fetch): Proveedor | null {
+  const key = config.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const llamar = (body: unknown) =>
+    postConReintentos(fetchImpl, 'https://api.anthropic.com/v1/messages', { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body, 'Claude',
+      (status, text) => (status === 429 && text.includes('enforced_spend_limit_reached') ? 'Se llegó al tope mensual de gasto de Claude. Avísale a Antpath.' : null));
   return {
-    disponible: Boolean(key),
+    nombre: 'claude',
+    modelo: config.CLAUDE_MODEL,
     async probar() {
       await llamar({ model: config.CLAUDE_MODEL, max_tokens: 5, messages: [{ role: 'user', content: 'ok' }] });
     },
-    async extraer(mensajes) {
-      const hoy = new Date().toISOString().slice(0, 10);
+    async generar(transcripcion) {
       const data = await llamar({
         model: config.CLAUDE_MODEL,
         max_tokens: 4000,
         system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: construirTranscripcion(mensajes, hoy) }],
+        messages: [{ role: 'user', content: transcripcion }],
         output_config: { format: { type: 'json_schema', schema: EXTRACCION_SCHEMA } },
       });
       if (data.stop_reason === 'refusal') throw new Error('El modelo no pudo procesar este chat.');
       if (data.stop_reason === 'max_tokens') throw new Error('El chat es demasiado largo; elige un tramo más corto.');
       const text = (data.content ?? []).find((b: { type: string }) => b.type === 'text')?.text;
-      if (!text) throw new Error('El modelo no devolvió texto.');
-      return zExtraccion.parse(JSON.parse(text));
+      if (!text) throw new Error('Claude no devolvió texto.');
+      return text;
+    },
+  };
+}
+
+/**
+ * OpenRouter: API compatible con OpenAI que da acceso a muchos modelos con una sola clave.
+ * - Salida estructurada con response_format json_schema (strict).
+ * - provider.require_parameters: solo usa endpoints que soportan la salida estructurada.
+ * - provider.data_collection = deny: solo proveedores que no guardan ni entrenan con los datos,
+ *   porque los chats traen datos personales de clientes.
+ */
+function proveedorOpenRouter(config: Config, fetchImpl: typeof fetch): Proveedor | null {
+  const key = config.OPENROUTER_API_KEY;
+  if (!key) return null;
+  const headers = { authorization: `Bearer ${key}`, 'HTTP-Referer': config.PUBLIC_URL, 'X-Title': 'Rock N Rolla Pedidos' };
+  const llamar = (body: unknown) =>
+    postConReintentos(fetchImpl, 'https://openrouter.ai/api/v1/chat/completions', headers, body, 'OpenRouter', (status, text) =>
+      status === 402 ? 'La cuenta de OpenRouter no tiene créditos. Recárgala en openrouter.ai.'
+        : status === 429 && /free-models-per-day|per-day/i.test(text)
+          ? 'Se acabó el límite diario de modelos gratuitos de OpenRouter (50 al día; 1,000 con al menos 10 créditos comprados).'
+        : status === 401 ? 'La clave de OpenRouter no es válida o está desactivada.'
+          : (status === 404 || status === 503) && dataCollection === 'deny' && /data policy|no endpoints|no available provider/i.test(text)
+            ? `Ningún proveedor de ${config.OPENROUTER_MODEL} cumple con no guardar los chats. Usa un modelo de pago o, solo para pruebas, OPENROUTER_DATA_COLLECTION=allow.`
+            : null);
+  // Los modelos gratuitos (p. ej. openrouter/free) casi siempre usan proveedores que guardan o
+  // entrenan con los datos: solo funcionan con OPENROUTER_DATA_COLLECTION=allow.
+  const dataCollection = config.OPENROUTER_DATA_COLLECTION;
+  const proveedor = { require_parameters: true, data_collection: dataCollection };
+  return {
+    nombre: 'openrouter',
+    modelo: config.OPENROUTER_MODEL,
+    async probar() {
+      const data = await llamar({ model: config.OPENROUTER_MODEL, max_tokens: 5, messages: [{ role: 'user', content: 'ok' }], provider: { data_collection: dataCollection } });
+      if (data.error) throw new Error(`OpenRouter: ${data.error.message ?? 'error desconocido'}`);
+    },
+    async generar(transcripcion) {
+      const data = await llamar({
+        model: config.OPENROUTER_MODEL,
+        max_tokens: 4000,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: transcripcion },
+        ],
+        response_format: { type: 'json_schema', json_schema: { name: 'pedido', strict: true, schema: EXTRACCION_SCHEMA } },
+        provider: proveedor,
+      });
+      // Un error durante la generación puede llegar con estado 200
+      if (data.error) throw new Error(`OpenRouter: ${data.error.message ?? 'error desconocido'}`);
+      const choice = data.choices?.[0];
+      if (choice?.error) throw new Error(`OpenRouter: ${choice.error.message ?? 'error del modelo'}`);
+      if (choice?.finish_reason === 'length') throw new Error('El chat es demasiado largo; elige un tramo más corto.');
+      if (choice?.finish_reason === 'content_filter') throw new Error('El modelo no pudo procesar este chat.');
+      const text: unknown = choice?.message?.content;
+      if (typeof text !== 'string' || !text.trim()) throw new Error('OpenRouter no devolvió texto.');
+      return text;
+    },
+  };
+}
+
+/** Algunos modelos envuelven el JSON en ```json … ```; se quita antes de leerlo. */
+export function leerJson(text: string): unknown {
+  const limpio = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  return JSON.parse(limpio);
+}
+
+export function crearExtractor(
+  config: Config,
+  fetchImpl: typeof fetch = fetch,
+  log: (msg: string) => void = (m) => console.warn(m),
+): Extractor {
+  const disponibles = [proveedorClaude(config, fetchImpl), proveedorOpenRouter(config, fetchImpl)].filter((p): p is Proveedor => p !== null);
+  // Principal: el que diga LLM_PROVIDER; si no se indica, Claude cuando hay clave.
+  const principal = config.LLM_PROVIDER ?? disponibles[0]?.nombre;
+  const orden = [...disponibles].sort((a, b) => Number(b.nombre === principal) - Number(a.nombre === principal));
+  const lista = config.LLM_FALLBACK ? orden : orden.slice(0, 1);
+
+  return {
+    disponible: lista.length > 0,
+    proveedores: lista.map((p) => ({ nombre: p.nombre, modelo: p.modelo })),
+    async probar(nombre) {
+      const p = nombre ? disponibles.find((x) => x.nombre === nombre) : lista[0];
+      if (!p) throw new ExtractorNoDisponible(nombre ? `${nombre} no está configurado.` : 'No hay ningún modelo configurado.');
+      await p.probar();
+    },
+    async extraer(mensajes) {
+      if (lista.length === 0) throw new ExtractorNoDisponible('Falta ANTHROPIC_API_KEY u OPENROUTER_API_KEY en el servidor.');
+      const transcripcion = construirTranscripcion(mensajes, new Date().toISOString().slice(0, 10));
+      let ultimoError: unknown;
+      for (const p of lista) {
+        try {
+          return zExtraccion.parse(leerJson(await p.generar(transcripcion)));
+        } catch (e) {
+          ultimoError = e;
+          const siguiente = lista[lista.indexOf(p) + 1];
+          if (siguiente) log(`Extracción con ${p.nombre} falló (${(e as Error).message}); se intenta con ${siguiente.nombre}.`);
+        }
+      }
+      if (ultimoError instanceof SyntaxError || ultimoError instanceof z.ZodError) {
+        throw new Error('El modelo devolvió datos con un formato inesperado. Intenta de nuevo.');
+      }
+      throw ultimoError;
     },
   };
 }

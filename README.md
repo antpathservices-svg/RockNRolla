@@ -45,7 +45,28 @@ npm run dev:web                         # http://localhost:5173 con recarga en v
 
 Con Docker: `docker compose up --build` y abre http://localhost:3000.
 
-Sin `ANTHROPIC_API_KEY` todo funciona menos el resumen y la extracción, que avisan que falta la clave.
+Sin `ANTHROPIC_API_KEY` ni `OPENROUTER_API_KEY` todo funciona menos el resumen y la extracción, que avisan que falta la clave.
+
+## Modelos: Claude y OpenRouter
+
+El resumen y la extracción del pedido pueden usar la API de Anthropic, OpenRouter o las dos:
+
+| Variables | Comportamiento |
+| --- | --- |
+| Solo `ANTHROPIC_API_KEY` | Usa Claude directo |
+| Solo `OPENROUTER_API_KEY` | Usa el modelo de `OPENROUTER_MODEL` por OpenRouter |
+| Las dos | Usa primero el de `LLM_PROVIDER` (Claude si no se indica) y, si falla, el otro (`LLM_FALLBACK=true`) |
+
+El respaldo entra cuando el primero falla: sin créditos o tope de gasto, servicio caído o una respuesta con formato
+inválido. Con OpenRouter la plataforma pide salida estructurada estricta y solo proveedores que no guardan ni
+entrenan con los datos (`data_collection: deny`), porque los chats traen datos personales. El modelo de
+`OPENROUTER_MODEL` debe aceptar salida estructurada; en openrouter.ai/models se filtra por "structured outputs".
+
+Modelos gratuitos (`OPENROUTER_MODEL=openrouter/free`): eligen al azar entre los modelos gratis y sus proveedores
+suelen guardar o entrenar con lo que reciben, así que solo funcionan con `OPENROUTER_DATA_COLLECTION=allow`.
+Úsalos solo con chats de prueba. Tienen límite de 50 peticiones al día (1,000 con al menos 10 créditos comprados)
+y la calidad varía según el modelo que toque; si responde en un formato inválido y está configurado Claude, entra
+Claude de respaldo.
 
 ## Pruebas
 

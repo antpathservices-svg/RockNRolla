@@ -153,10 +153,20 @@ export function Configuracion() {
 }
 
 function ConexionesGrid({ c, probando, onProbar }: { c: Conexiones; probando: string | null; onProbar: (n: string) => void }) {
+  const papel = (n: 'claude' | 'openrouter') => {
+    const i = c.modelos.indexOf(n);
+    return c.modelos.length > 1 && i >= 0 ? (i === 0 ? ' · principal' : ' · respaldo') : '';
+  };
   const items: Array<{ id: string; titulo: string; estado: string; texto: React.ReactNode; probar: boolean }> = [
     { id: 'whatsapp', titulo: 'WhatsApp', estado: c.whatsapp.estado, probar: c.whatsapp.estado === 'conectado',
       texto: c.whatsapp.estado === 'conectado' ? `Webhook: ${c.whatsapp.webhook}` : <>El número aún no está dado de alta en Meta. <Link to="/prueba">Cargar un chat de prueba</Link></> },
-    { id: 'claude', titulo: 'Claude', estado: c.claude.estado, probar: c.claude.estado === 'conectado', texto: `Modelo ${c.claude.modelo}` },
+    { id: 'claude', titulo: `Claude${papel('claude')}`, estado: c.claude.estado, probar: c.claude.estado === 'conectado', texto: `Modelo ${c.claude.modelo}` },
+    { id: 'openrouter', titulo: `OpenRouter${papel('openrouter')}`, estado: c.openrouter.estado, probar: c.openrouter.estado === 'conectado',
+      texto: c.openrouter.estado === 'conectado'
+        ? c.openrouter.permiteGuardarDatos
+          ? <>Modelo {c.openrouter.modelo}. <strong style={{ color: 'var(--rojo)' }}>Los proveedores pueden guardar y entrenar con los chats: úsalo solo con chats de prueba.</strong></>
+          : `Modelo ${c.openrouter.modelo}. Solo usa proveedores que no guardan los chats.`
+        : 'Opcional: otra vía a los modelos, útil como respaldo si Claude falla o se acaba el saldo.' },
     { id: 'calendario', titulo: 'Google Calendar', estado: c.calendario.estado, probar: c.calendario.estado === 'conectado',
       texto: 'Comparte tu calendario con la cuenta de servicio, con permiso para hacer cambios en eventos.' },
     { id: 'login', titulo: 'Inicio de sesión con Google', estado: c.login.estado, probar: false, texto: 'Solo nombre, correo y perfil.' },

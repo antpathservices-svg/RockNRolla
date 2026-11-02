@@ -96,6 +96,7 @@ describe.skipIf(!URL)('flujo completo', () => {
       db,
       extractor: {
         disponible: true,
+        proveedores: [{ nombre: 'claude', modelo: 'prueba' }],
         async probar() {},
         async extraer(ms) {
           recibidoPorModelo.push(...ms.map((m) => m.texto));

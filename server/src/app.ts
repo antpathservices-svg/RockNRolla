@@ -28,7 +28,7 @@ export async function buildApp(ctx: Ctx, opts: { logger?: boolean } = {}): Promi
   });
 
   // Registros sin datos secretos
-  app.log.info({ claude: Boolean(config.ANTHROPIC_API_KEY), calendario: ctx.calendario.disponible, whatsapp: ctx.whatsapp.disponible }, 'Conexiones');
+  app.log.info({ modelos: ctx.extractor.proveedores.map((p) => p.nombre), calendario: ctx.calendario.disponible, whatsapp: ctx.whatsapp.disponible }, 'Conexiones');
 
   await app.register(secureSession, {
     key: Buffer.from(config.SESSION_SECRET, 'hex'),

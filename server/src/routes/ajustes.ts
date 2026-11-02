@@ -60,6 +60,9 @@ export async function ajustesRoutes(app: FastifyInstance, ctx: Ctx) {
     return {
       whatsapp: { estado: has.whatsapp(config) ? 'conectado' : ('modo_prueba' as EstadoConexion), webhook: `${config.PUBLIC_URL}/webhook/whatsapp` },
       claude: { estado: estado(has.claude(config)), modelo: config.CLAUDE_MODEL },
+      openrouter: { estado: estado(has.openrouter(config)), modelo: config.OPENROUTER_MODEL, permiteGuardarDatos: config.OPENROUTER_DATA_COLLECTION === 'allow' },
+      // Orden en que se usan los modelos: el primero es el principal; el segundo, el respaldo
+      modelos: ctx.extractor.proveedores.map((p) => p.nombre),
       calendario: { estado: estado(has.calendar(config)), calendarioId: config.GOOGLE_CALENDAR_ID ? '(configurado)' : null },
       login: { estado: estado(has.googleLogin(config)) },
       ultimoRespaldo,
@@ -68,7 +71,8 @@ export async function ajustesRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post<{ Params: { nombre: string } }>('/api/conexiones/:nombre/probar', { preHandler: requiereUsuario('dueno') }, async (req, reply) => {
     const pruebas: Record<string, () => Promise<void>> = {
-      claude: () => ctx.extractor.probar(),
+      claude: () => ctx.extractor.probar('claude'),
+      openrouter: () => ctx.extractor.probar('openrouter'),
       calendario: () => ctx.calendario.probar(),
       whatsapp: () => ctx.whatsapp.probar(),
     };
