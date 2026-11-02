@@ -214,13 +214,14 @@ function proveedorOpenRouter(config: Config, fetchImpl: typeof fetch): Proveedor
         : status === 429 && /free-models-per-day|per-day/i.test(text)
           ? 'Se acabó el límite diario de modelos gratuitos de OpenRouter (50 al día; 1,000 con al menos 10 créditos comprados).'
         : status === 401 ? 'La clave de OpenRouter no es válida o está desactivada.'
-          : (status === 404 || status === 503) && dataCollection === 'deny' && /data policy|no endpoints|no available provider/i.test(text)
+          : (status === 404 || status === 503) && dataCollection === 'deny' && /data policy|no available provider/i.test(text) && !/requested parameters/i.test(text)
             ? `Ningún proveedor de ${config.OPENROUTER_MODEL} cumple con no guardar los chats. Usa un modelo de pago o, solo para pruebas, OPENROUTER_DATA_COLLECTION=allow.`
             : null);
   // Los modelos gratuitos (p. ej. openrouter/free) casi siempre usan proveedores que guardan o
   // entrenan con los datos: solo funcionan con OPENROUTER_DATA_COLLECTION=allow.
   const dataCollection = config.OPENROUTER_DATA_COLLECTION;
   const proveedor = { require_parameters: true, data_collection: dataCollection };
+  let modoInicial = 0;
   return {
     nombre: 'openrouter',
     modelo: config.OPENROUTER_MODEL,
@@ -229,33 +230,68 @@ function proveedorOpenRouter(config: Config, fetchImpl: typeof fetch): Proveedor
       if (data.error) throw new Error(`OpenRouter: ${data.error.message ?? 'error desconocido'}`);
     },
     async generar(transcripcion) {
-      const data = await llamar({
-        model: config.OPENROUTER_MODEL,
-        max_tokens: 4000,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: transcripcion },
-        ],
-        response_format: { type: 'json_schema', json_schema: { name: 'pedido', strict: true, schema: EXTRACCION_SCHEMA } },
-        provider: proveedor,
-      });
-      // Un error durante la generación puede llegar con estado 200
-      if (data.error) throw new Error(`OpenRouter: ${data.error.message ?? 'error desconocido'}`);
-      const choice = data.choices?.[0];
-      if (choice?.error) throw new Error(`OpenRouter: ${choice.error.message ?? 'error del modelo'}`);
-      if (choice?.finish_reason === 'length') throw new Error('El chat es demasiado largo; elige un tramo más corto.');
-      if (choice?.finish_reason === 'content_filter') throw new Error('El modelo no pudo procesar este chat.');
-      const text: unknown = choice?.message?.content;
-      if (typeof text !== 'string' || !text.trim()) throw new Error('OpenRouter no devolvió texto.');
-      return text;
+      // Se empieza por el modo más estricto. Si OpenRouter dice que ningún endpoint acepta esos
+      // parámetros (pasa con enrutadores como openrouter/free), se baja de modo; la respuesta
+      // se valida igual en el servidor con el esquema. El modo que funcionó se recuerda.
+      for (let i = modoInicial; i < MODOS.length; i++) {
+        const modo = MODOS[i];
+        try {
+          const data = await llamar({
+            model: config.OPENROUTER_MODEL,
+            max_tokens: 4000,
+            messages: [
+              { role: 'system', content: modo.esquemaEnPrompt ? `${SYSTEM_PROMPT}\n\n${INSTRUCCION_JSON}` : SYSTEM_PROMPT },
+              { role: 'user', content: transcripcion },
+            ],
+            ...(modo.responseFormat ? { response_format: modo.responseFormat } : {}),
+            provider: modo.requireParameters ? proveedor : { data_collection: dataCollection },
+          });
+          modoInicial = i;
+          return leerRespuesta(data);
+        } catch (e) {
+          const sinEndpoint = /can handle the requested parameters/i.test((e as Error).message);
+          if (!sinEndpoint || i === MODOS.length - 1) throw e;
+        }
+      }
+      throw new Error('OpenRouter no aceptó la petición.');
     },
   };
+}
+
+const INSTRUCCION_JSON = `Responde SOLO con un objeto JSON válido, sin texto antes ni después y sin bloques de código, que cumpla este esquema JSON:\n${JSON.stringify(EXTRACCION_SCHEMA)}`;
+
+/** Modos de pedir el JSON a OpenRouter, del más estricto al más flexible. */
+const MODOS: Array<{ responseFormat: unknown; requireParameters: boolean; esquemaEnPrompt: boolean }> = [
+  { responseFormat: { type: 'json_schema', json_schema: { name: 'pedido', strict: true, schema: EXTRACCION_SCHEMA } }, requireParameters: true, esquemaEnPrompt: false },
+  { responseFormat: { type: 'json_schema', json_schema: { name: 'pedido', strict: true, schema: EXTRACCION_SCHEMA } }, requireParameters: false, esquemaEnPrompt: true },
+  { responseFormat: { type: 'json_object' }, requireParameters: false, esquemaEnPrompt: true },
+  { responseFormat: null, requireParameters: false, esquemaEnPrompt: true },
+];
+
+function leerRespuesta(data: any): string {
+  // Un error durante la generación puede llegar con estado 200
+  if (data.error) throw new Error(`OpenRouter: ${data.error.message ?? 'error desconocido'}`);
+  const choice = data.choices?.[0];
+  if (choice?.error) throw new Error(`OpenRouter: ${choice.error.message ?? 'error del modelo'}`);
+  if (choice?.finish_reason === 'length') throw new Error('El chat es demasiado largo; elige un tramo más corto.');
+  if (choice?.finish_reason === 'content_filter') throw new Error('El modelo no pudo procesar este chat.');
+  const text: unknown = choice?.message?.content;
+  if (typeof text !== 'string' || !text.trim()) throw new Error('OpenRouter no devolvió texto.');
+  return text;
 }
 
 /** Algunos modelos envuelven el JSON en ```json … ```; se quita antes de leerlo. */
 export function leerJson(text: string): unknown {
   const limpio = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  return JSON.parse(limpio);
+  try {
+    return JSON.parse(limpio);
+  } catch (e) {
+    // Modelos sin salida estructurada a veces agregan texto alrededor: se toma el objeto JSON
+    const i = limpio.indexOf('{');
+    const j = limpio.lastIndexOf('}');
+    if (i >= 0 && j > i) return JSON.parse(limpio.slice(i, j + 1));
+    throw e;
+  }
 }
 
 export function crearExtractor(

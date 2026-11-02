@@ -1,0 +1,13 @@
+node_modules/
+dist/
+web/dist-demo/
+storage/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+# Chats reales de clientes: nunca al repositorio
+chats/
+*.txt
+!**/fixtures/*.txt

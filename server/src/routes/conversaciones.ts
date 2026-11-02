@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../context.js';
 import { ExtractorNoDisponible } from '../services/extraction.js';
@@ -8,6 +8,13 @@ import { getAjustes } from '../services/settings.js';
 import { requiereUsuario, usuarioActual } from './auth.js';
 
 const MAX_TEXTO = 2 * 1024 * 1024; // 2 MB
+
+/** Error del proveedor del modelo: se registra completo y la pantalla recibe el motivo, sin "Ocurrió un error". */
+function errorDelModelo(req: FastifyRequest, reply: FastifyReply, e: unknown) {
+  req.log.error(e, 'Falló el modelo');
+  const msg = (e as Error).message ?? 'Error desconocido';
+  return reply.code(502).send({ error: `No se pudo leer el chat con el modelo. ${msg.slice(0, 300)}` });
+}
 
 const zVista = z.object({ texto: z.string().min(1).max(MAX_TEXTO) });
 const zImportar = z.object({
@@ -62,7 +69,7 @@ export async function conversacionesRoutes(app: FastifyInstance, ctx: Ctx) {
       return { resumen: ext.resumen, extraccion: ext };
     } catch (e) {
       if (e instanceof ExtractorNoDisponible) return reply.code(503).send({ error: e.message });
-      throw e;
+      return errorDelModelo(req, reply, e);
     }
   });
 
@@ -81,7 +88,7 @@ export async function conversacionesRoutes(app: FastifyInstance, ctx: Ctx) {
       }
     } catch (e) {
       if (e instanceof ExtractorNoDisponible) return reply.code(503).send({ error: e.message });
-      throw e;
+      return errorDelModelo(req, reply, e);
     }
     const datos = pedidoDesdeExtraccion(ext);
     const p = await crearPedido(
