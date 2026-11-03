@@ -282,6 +282,35 @@ describe.skipIf(!URL)('flujo completo', () => {
     expect(s.json()).toEqual({ encolados: 1 });
   });
 
+  it('el dueño elimina un pedido con su evento, fotos y notas; la conversación queda', async () => {
+    const lista = (await pedir('GET', '/api/pedidos?q=Calendario Ejemplo')).json();
+    const id = lista[0].id;
+    await pedir('PATCH', `/api/pedidos/${id}`, { clienteNombre: 'Calendario Ejemplo' });
+    await db.query(`update pedidos set evento_calendario_id = 'evt-borrar' where id = $1`, [id]);
+    eventos.length = 0;
+    const r = await pedir('DELETE', `/api/pedidos/${id}`);
+    expect(r.status).toBe(200);
+    expect(r.json()).toMatchObject({ ok: true, avisoCalendario: null });
+    expect(eventos).toEqual(['borrar evt-borrar']);
+    expect((await pedir('GET', `/api/pedidos/${id}`)).status).toBe(404);
+    expect((await pedir('DELETE', `/api/pedidos/${id}`)).status).toBe(404);
+    const bit = await db.query(`select usuario, detalle from bitacora where accion = 'pedido_eliminado' and entidad_id = $1`, [id]);
+    expect(bit.rows[0].detalle.folio).toBe(lista[0].folio);
+
+    // El pedido con nota en PDF y conversación: el PDF se borra del disco y la conversación sigue
+    const notas = await db.query<{ archivo: string; pedido_id: string; conversacion_id: string }>(
+      `select n.archivo, n.pedido_id, p.conversacion_id from notas n join pedidos p on p.id = n.pedido_id where p.conversacion_id is not null limit 1`,
+    );
+    const n = notas.rows[0];
+    const pdf = join(ctx.config.STORAGE_DIR, n.archivo);
+    expect(existsSync(pdf)).toBe(true);
+    expect((await pedir('DELETE', `/api/pedidos/${n.pedido_id}`)).status).toBe(200);
+    expect(existsSync(pdf)).toBe(false);
+    const conv = await pedir('GET', `/api/conversaciones/${n.conversacion_id}`);
+    expect(conv.status).toBe(200);
+    expect(conv.json().conversacion.pedidoId).toBeNull();
+  });
+
   it('el operador no puede cambiar ajustes del dueño', async () => {
     await db.query(`insert into usuarios (email, rol) values ('operador@ejemplo.mx', 'operador')`);
     await db.query(`update usuarios set email = 'otro@ejemplo.mx' where email = 'duena@ejemplo.mx'`);
@@ -295,6 +324,9 @@ describe.skipIf(!URL)('flujo completo', () => {
     // En el calendario ve que el dueño está ocupado, no su agenda personal
     const cal = await app.inject({ method: 'GET', url: '/api/calendario?desde=2026-12-01&hasta=2026-12-31&fresco=1', headers: { cookie: cookieOp } });
     expect(cal.json().eventos[0]).toMatchObject({ titulo: 'Ocupado', enlace: null, ubicacion: null });
+    // Tampoco puede eliminar pedidos
+    const del = await app.inject({ method: 'DELETE', url: `/api/pedidos/${pedido.id}`, headers: { cookie: cookieOp } });
+    expect(del.statusCode).toBe(403);
   });
 
   it('existe el PDF en disco', () => {

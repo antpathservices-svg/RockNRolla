@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import type { PanelCtx } from '../App';
 import { calcularMontos, ESTADOS, ETIQUETA_ESTADO, formatoPesos, parsePesos, type Estado, type Mensaje } from '@rnr/shared';
 import { ApiError, type Ajustes, type PastelEditable, type PedidoDetalle } from '../api';
 import { api, copiar, diaMensaje, EstadoChip, fechaCorta, horaMensaje, hoy, Icono, useCarga, useDialogo, useToast } from '../ui';
@@ -18,6 +19,9 @@ const pastelVacio = (): PastelEditable => ({
 
 export function PedidoPage() {
   const { id } = useParams();
+  const { usuario } = useOutletContext<PanelCtx>();
+  const navigate = useNavigate();
+  const [eliminando, setEliminando] = useState(false);
   const toast = useToast();
   const dialogo = useDialogo();
   const carga = useCarga(() => api.pedido(id!), [id]);
@@ -111,6 +115,27 @@ export function PedidoPage() {
       toast(pend?.length ? pend[0] : (e as Error).message);
     } finally {
       setOcupado(null);
+    }
+  }
+
+  async function eliminar() {
+    if (!carga.data) return;
+    const p = carga.data;
+    const ok = await dialogo.confirmar(
+      `¿Eliminar el pedido ${p.folio}?`,
+      'Eliminar para siempre',
+      `Se borran ${p.clienteNombre ? `el pedido de ${p.clienteNombre}` : 'el pedido'}, sus fotos y sus notas en PDF${p.eventoCalendarioId ? ', y su evento en Google Calendar' : ''}. No se puede deshacer.`,
+    );
+    if (!ok) return;
+    setEliminando(true);
+    try {
+      const r = await api.eliminarPedido(p.id);
+      setSucio(false);
+      toast(r.avisoCalendario ? `Pedido ${r.folio} eliminado. ${r.avisoCalendario}` : `Pedido ${r.folio} eliminado.`);
+      navigate('/pedidos', { replace: true });
+    } catch (e) {
+      toast((e as Error).message);
+      setEliminando(false);
     }
   }
 
@@ -336,6 +361,19 @@ export function PedidoPage() {
             {p.tokenActivo && <button type="button" className="btn texto" style={{ alignSelf: 'flex-start' }}
               onClick={async () => { await api.desactivarLink(p.id); setLinkCliente(null); carga.recargar(); }}>Desactivar link</button>}
           </section>
+
+          {usuario.rol === 'dueno' && (
+            <section className="tarjeta" style={{ display: 'flex', flexDirection: 'column', gap: 10, borderColor: '#e9c7c7' }}>
+              <h2>Eliminar pedido</h2>
+              <p className="small muted">
+                Lo borra para siempre, con sus fotos, notas en PDF{p.eventoCalendarioId ? ' y su evento en Google Calendar' : ''}. La conversación se conserva.
+                Si el pedido solo no se concretó, mejor cancélalo: así queda en el historial.
+              </p>
+              <button type="button" className="btn peligro" style={{ alignSelf: 'flex-start' }} disabled={eliminando} onClick={eliminar}>
+                {eliminando ? 'Eliminando…' : 'Eliminar pedido'}
+              </button>
+            </section>
+          )}
         </aside>
       </div>
     </main>

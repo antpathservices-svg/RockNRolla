@@ -138,6 +138,8 @@ export interface Api {
   crearPedido(): Promise<{ id: string }>;
   actualizarPedido(id: string, patch: PedidoPatch): Promise<PedidoDetalle>;
   cambiarEstado(id: string, estado: Estado, motivo?: string): Promise<Pedido>;
+  /** Solo el dueño. Borra para siempre el pedido, sus fotos, notas y evento del calendario. */
+  eliminarPedido(id: string): Promise<{ folio: string; avisoCalendario: string | null }>;
   aprobar(id: string): Promise<{ version: number; url: string }>;
   enviarNota(id: string): Promise<void>;
   generarLink(id: string): Promise<{ url: string }>;
@@ -209,6 +211,7 @@ export const httpApi: Api = {
   crearPedido: () => http('POST', '/api/pedidos', {}),
   actualizarPedido: (id, patch) => http('PATCH', `/api/pedidos/${id}`, patch),
   cambiarEstado: (id, estado, motivo) => http('POST', `/api/pedidos/${id}/estado`, { estado, motivo }),
+  eliminarPedido: (id) => http('DELETE', `/api/pedidos/${id}`),
   aprobar: (id) => http('POST', `/api/pedidos/${id}/aprobar`),
   enviarNota: (id) => http('POST', `/api/pedidos/${id}/enviar-nota`),
   generarLink: (id) => http('POST', `/api/pedidos/${id}/link`),
