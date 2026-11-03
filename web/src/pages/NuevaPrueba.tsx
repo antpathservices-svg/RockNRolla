@@ -71,7 +71,7 @@ export function NuevaPrueba() {
 
   return (
     <main className="contenido" style={{ maxWidth: 1040 }}>
-      <Link to="/" style={{ fontSize: 14, textDecoration: 'none' }}>← Bandeja</Link>
+      <Link to="/" className="volver"><Icono.atras />Bandeja</Link>
       <h1>Nueva conversación de prueba</h1>
       <p style={{ fontSize: 14, color: 'var(--texto-2)' }}>Mientras no esté conectada la API de WhatsApp, carga aquí un chat para probar el resumen, el pedido y la nota.</p>
 

@@ -46,13 +46,13 @@ function Panel() {
   return (
     <div className="app">
       <nav className="nav" aria-label="Menú principal">
-        <div className="marca"><img src={logo} alt="" /><span>Rock N Rolla<br />Cakes</span></div>
+        <div className="marca"><img src={logo} alt="Rock N Rolla Cakes" /><span aria-hidden="true">Rock N Rolla<br />Cakes</span></div>
         <NavLink to="/" className={enBandeja ? 'activo' : undefined} aria-current={enBandeja ? 'page' : undefined}>
-          <Icono.chat />Bandeja
+          <Icono.chat /><span>Bandeja</span>
         </NavLink>
-        <NavLink to="/pedidos" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.lista />Pedidos</NavLink>
-        <NavLink to="/calendario" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.calendario />Calendario</NavLink>
-        <NavLink to="/configuracion" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.ajustes />Configuración</NavLink>
+        <NavLink to="/pedidos" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.lista /><span>Pedidos</span></NavLink>
+        <NavLink to="/calendario" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.calendario /><span>Calendario</span></NavLink>
+        <NavLink to="/configuracion" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.ajustes /><span>Configuración</span></NavLink>
         <div className="pie">
           <span>{usuario.nombre ?? usuario.email} · {usuario.rol === 'dueno' ? 'Dueño' : 'Operador'}</span>
           {api.demo ? <span>Vista previa con datos de ejemplo</span> : (

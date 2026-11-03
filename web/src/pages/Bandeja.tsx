@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Mensaje } from '@rnr/shared';
-import { api, copiar, diaMensaje, EstadoChip, horaMensaje, Icono, useCarga, useDialogo, useToast } from '../ui';
+import { api, copiar, diaMensaje, EstadoChip, horaMensaje, Icono, useAngosto, useCarga, useDialogo, useToast } from '../ui';
 
 const ORIGEN: Record<string, string> = { archivo: 'archivo', texto: 'texto pegado', whatsapp: 'WhatsApp', formulario: 'formulario' };
 
@@ -13,7 +13,12 @@ export function Bandeja() {
   const [q, setQ] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const lista = useCarga(() => api.conversaciones(busqueda || undefined), [busqueda]);
-  const seleccion = id ?? lista.data?.[0]?.id;
+  // En tableta y celular se ve la lista o el chat, no los dos: sin id en la URL, solo la lista.
+  const angosto = useAngosto(1023);
+  const celular = useAngosto(760);
+  const [vista, setVista] = useState<'chat' | 'resumen'>('chat');
+  useEffect(() => setVista('chat'), [id]);
+  const seleccion = id ?? (angosto ? undefined : lista.data?.[0]?.id);
   const detalle = useCarga(() => (seleccion ? api.conversacion(seleccion) : Promise.resolve(null)), [seleccion]);
   const [trabajando, setTrabajando] = useState<string | null>(null);
 
@@ -35,8 +40,19 @@ export function Bandeja() {
     }
   }
 
+  const clases = ['bandeja', angosto && !id ? 'sin-detalle' : 'con-detalle', celular && id ? `ver-${vista}` : ''].filter(Boolean).join(' ');
+
+  const accionPrincipal = conv && (conv.pedidoId ? (
+    <Link to={`/pedidos/${conv.pedidoId}`} className="btn primario grande">Ver pedido</Link>
+  ) : (
+    <button type="button" className="btn primario grande" disabled={trabajando !== null}
+      onClick={() => accion('pedido', async () => { const r = await api.pedidoDesdeConversacion(conv.id); navigate(`/pedidos/${r.id}`); })}>
+      {trabajando === 'pedido' ? 'Leyendo el chat…' : 'Crear pedido borrador'}
+    </button>
+  ));
+
   return (
-    <div className="bandeja">
+    <div className={clases}>
       <section className="lista-conv" aria-label="Conversaciones">
         <div style={{ padding: '20px 16px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="fila" style={{ justifyContent: 'space-between' }}>
@@ -79,22 +95,36 @@ export function Bandeja() {
         ) : (
           <>
             <header>
-              <div>
+              {angosto && <Link to="/" className="volver" aria-label="Volver a la bandeja"><Icono.atras /></Link>}
+              <div className="titulo">
                 <div style={{ fontWeight: 700, fontSize: 16 }}>{conv.clienteNombre ?? 'Sin nombre'}</div>
                 <div className="muted small">{conv.totalMensajes} mensajes · {conv.esPrueba ? `cargado desde ${ORIGEN[conv.origen]}` : 'WhatsApp'}</div>
               </div>
               {conv.esPrueba && <span className="chip prueba" style={{ marginLeft: 'auto' }}>Prueba</span>}
             </header>
+            {celular && <TabsMovil vista={vista} setVista={setVista} />}
             <Mensajes mensajes={detalle.data!.mensajes} />
-            <div style={{ padding: '12px 20px', background: '#fff', borderTop: '1px solid var(--borde)' }} className="muted">
-              Las respuestas se siguen mandando desde la app de WhatsApp Business.
-            </div>
+            {celular ? (
+              <div className="pie-chat">
+                <button type="button" className="btn grande" onClick={() => setVista('resumen')}>Resumen</button>
+                {accionPrincipal}
+              </div>
+            ) : (
+              <div className="pie-chat muted">Las respuestas se siguen mandando desde la app de WhatsApp Business.</div>
+            )}
           </>
         )}
       </section>
 
       {conv && (
         <aside className="panel-resumen" aria-label="Resumen del chat">
+          {celular && (
+            <div className="fila" style={{ flexWrap: 'nowrap', margin: '-8px -4px 0' }}>
+              <Link to="/" className="volver" aria-label="Volver a la bandeja"><Icono.atras /></Link>
+              <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.clienteNombre ?? 'Sin nombre'}</strong>
+            </div>
+          )}
+          {celular && <TabsMovil vista={vista} setVista={setVista} />}
           <h2>Resumen</h2>
           {conv.resumen ? <p style={{ fontSize: 14, lineHeight: 1.5, color: '#3a3132' }}>{conv.resumen}</p> : (
             <>
@@ -111,14 +141,7 @@ export function Bandeja() {
               {conv.dudas.slice(0, 3).map((d, i) => <span key={i}>{d.motivo}</span>)}
             </div>
           )}
-          {conv.pedidoId ? (
-            <Link to={`/pedidos/${conv.pedidoId}`} className="btn primario grande">Ver pedido</Link>
-          ) : (
-            <button type="button" className="btn primario grande" disabled={trabajando !== null}
-              onClick={() => accion('pedido', async () => { const r = await api.pedidoDesdeConversacion(conv.id); navigate(`/pedidos/${r.id}`); })}>
-              {trabajando === 'pedido' ? 'Leyendo el chat…' : 'Crear pedido borrador'}
-            </button>
-          )}
+          {accionPrincipal}
           <button type="button" className="btn" disabled={trabajando !== null}
             onClick={() => accion('link', async () => {
               const r = await api.linkDesdeConversacion(conv.id);
@@ -148,7 +171,19 @@ export function Bandeja() {
   );
 }
 
+function TabsMovil({ vista, setVista }: { vista: 'chat' | 'resumen'; setVista: (v: 'chat' | 'resumen') => void }) {
+  return (
+    <div className="tabs-movil" role="tablist" aria-label="Ver">
+      <button type="button" role="tab" aria-selected={vista === 'chat'} onClick={() => setVista('chat')}>Chat</button>
+      <button type="button" role="tab" aria-selected={vista === 'resumen'} onClick={() => setVista('resumen')}>Resumen y acciones</button>
+    </div>
+  );
+}
+
 function Mensajes({ mensajes }: { mensajes: Mensaje[] }) {
+  const caja = useRef<HTMLDivElement>(null);
+  // El chat abre en el mensaje más reciente, como en WhatsApp.
+  useEffect(() => { if (caja.current) caja.current.scrollTop = caja.current.scrollHeight; }, [mensajes]);
   const items = useMemo(() => {
     const out: Array<{ dia?: string; m?: Mensaje }> = [];
     let dia = '';
@@ -161,7 +196,7 @@ function Mensajes({ mensajes }: { mensajes: Mensaje[] }) {
   }, [mensajes]);
 
   return (
-    <div className="mensajes">
+    <div className="mensajes" ref={caja} tabIndex={0} aria-label="Mensajes">
       {items.map((it, i) => it.dia ? <div key={`d${i}`} className="separador-dia">{it.dia}</div> : (
         <div key={it.m!.id} className={`burbuja ${it.m!.rol} ${it.m!.tipo !== 'texto' && it.m!.rol !== 'sistema' ? 'adjunto' : ''}`}>
           {it.m!.tipo === 'adjunto' || it.m!.tipo === 'multimedia_omitida' ? (
