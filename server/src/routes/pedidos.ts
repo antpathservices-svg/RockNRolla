@@ -19,7 +19,7 @@ import {
   pendientesParaAprobar,
   zPedidoPatch,
 } from '../services/orders.js';
-import { vistaNota } from '../services/pdf.js';
+import { MAX_FOTOS_NOTA, MIME_EN_NOTA, vistaNota, type FotoNota } from '../services/pdf.js';
 import { getAjustes } from '../services/settings.js';
 import { requiereUsuario, usuarioActual } from './auth.js';
 
@@ -57,6 +57,20 @@ export async function pedidosRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db, config } = ctx;
   app.addHook('preHandler', requiereUsuario());
   const yo = (req: Parameters<typeof usuarioActual>[0]) => usuarioActual(req)!.email;
+
+  /**
+   * Fotos para la nota: solo se leen del disco las que se van a imprimir (hasta 4 dibujables);
+   * de las demás basta el formato para que la leyenda diga cuántas quedaron fuera.
+   */
+  async function fotosNota(pedidoId: string): Promise<FotoNota[]> {
+    const { rows } = await db.query<{ archivo: string; mime: string }>('select archivo, mime from referencias where pedido_id = $1 order by creado', [pedidoId]);
+    let leidas = 0;
+    return Promise.all(rows.map(async (r) => {
+      if (!MIME_EN_NOTA.has(r.mime) || leidas++ >= MAX_FOTOS_NOTA) return { src: '', mime: r.mime };
+      const datos = await readFile(rutaSegura(config.STORAGE_DIR, r.archivo)).catch(() => null);
+      return datos ? { src: `data:${r.mime};base64,${datos.toString('base64')}`, mime: r.mime } : { src: '', mime: 'faltante' };
+    }));
+  }
 
   app.get('/api/pedidos', async (req) => listPedidos(db, zLista.parse(req.query)));
 
@@ -102,11 +116,7 @@ export async function pedidosRoutes(app: FastifyInstance, ctx: Ctx) {
     if (faltan.length) return reply.code(422).send({ error: 'Faltan datos para aprobar.', pendientes: faltan });
 
     const ajustes = await getAjustes(db);
-    const refs = await db.query('select archivo, mime from referencias where pedido_id = $1 order by creado limit 2', [p.id]);
-    const imgs = await Promise.all(
-      refs.rows.map(async (r) => `data:${r.mime};base64,${(await readFile(rutaSegura(config.STORAGE_DIR, r.archivo))).toString('base64')}`),
-    );
-    const vista = vistaNota(p, ajustes, await ctx.pdf.logoDataUri(), imgs);
+    const vista = vistaNota(p, ajustes, await ctx.pdf.logoDataUri(), await fotosNota(p.id));
     const version = p.notas.length + 1;
     const nombre = `${p.folio.replace('#', '')}_v${version}.pdf`;
     const rel = await ctx.pdf.generar(vista, nombre);
@@ -132,7 +142,7 @@ export async function pedidosRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get<{ Params: { id: string } }>('/api/pedidos/:id/nota-preview', async (req, reply) => {
     const p = await getPedido(db, req.params.id);
     if (!p) return reply.code(404).send({ error: 'No existe el pedido.' });
-    const vista = vistaNota(p, await getAjustes(db), await ctx.pdf.logoDataUri(), []);
+    const vista = vistaNota(p, await getAjustes(db), await ctx.pdf.logoDataUri(), await fotosNota(p.id));
     return reply.type('text/html').send(await ctx.pdf.html(vista));
   });
 

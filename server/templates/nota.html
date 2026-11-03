@@ -20,9 +20,12 @@
   folio                   "#0012_NOV"
   vigencia                fecha límite de la cotización, ya formateada (opcional)
   campos[]                {etiqueta, valor}  datos del pedido (fecha, hora, dirección...)
-  referencias[]           {src}  imágenes de referencia (data URI), 0 a 2
-  referencias_leyenda     texto bajo las imágenes (opcional)
-  detalles[]              {etiqueta, valor} o {subtitulo}  detalles del pastel
+  referencias[]           {src}  imágenes de referencia (data URI), 0 a 4
+  referencias_clase       n0…n4: acomodo según cuántas hay (1 grande, 2 lado a lado,
+                          3 = una grande y dos apiladas, 4 = cuadrícula de 2×2)
+  referencias_leyenda     texto bajo las imágenes; avisa si quedaron fotos fuera (opcional)
+  pasteles[]              {subtitulo, filas[{etiqueta, valor}]}  un grupo por pastel
+  varios_pasteles         true con 2 o más pasteles: los grupos van a dos columnas
   costo, envio, total, anticipo, saldo   montos ya formateados; envio y anticipo son opcionales
 
   Colores y medidas en las variables CSS de :root.
@@ -88,14 +91,23 @@ body{
 .subtitulo-fila{ margin:0.1in 0 0.04in; font-weight:700; font-size:10pt; border-bottom:1px dotted var(--borde); }
 
 .refs-caja{ padding:0.1in 0.1in 0.06in; text-align:center; height:100%; }
-.refs{ display:flex; gap:0.06in; justify-content:center; align-items:flex-start; }
-.refs img{ flex:1 1 0; width:0; min-width:0; max-width:2.3in; height:2.9in; object-fit:cover; object-position:50% 35%; display:block; }
+.refs{ display:grid; gap:0.06in; height:2.9in; }
+.refs img{ width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; object-position:50% 35%; display:block; }
+.refs.n1{ grid-template-columns:minmax(0, 2.6in); justify-content:center; }
+.refs.n2{ grid-template-columns:1fr 1fr; }
+.refs.n3{ grid-template-columns:1.25fr 1fr; grid-template-rows:1fr 1fr; }
+.refs.n3 img:first-child{ grid-row:1 / span 2; }
+.refs.n4{ grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
 .refs-leyenda{ margin-top:0.14in; font-size:8pt; font-style:italic; color:var(--gris); }
 .sin-ref{ padding:1.4in 0.2in; text-align:center; font-size:9pt; font-style:italic; color:var(--gris); }
 
 .seccion{ break-after:avoid; margin:0.1in 0 0; font-size:11pt; font-weight:400; text-transform:uppercase; }
 .bloque.detalle{ margin-top:0.28in; }
 .detalle .izq{ min-height:2.35in; }
+.detalle .izq.varios{ column-count:2; column-gap:0.16in; }
+.grupo-pastel{ break-inside:avoid; }
+.grupo-pastel + .grupo-pastel{ margin-top:0.04in; }
+.varios .subtitulo-fila{ margin-top:0; }
 .costos{ background:var(--amarillo); padding:0.3in 0.08in 0.08in; display:flex; flex-direction:column; justify-content:center; border-left:1px solid var(--borde); }
 .costos .et{ color:var(--rosa); font-size:9pt; text-transform:uppercase; }
 .costos .monto{ font-size:12.5pt; font-weight:700; margin:0.02in 0 0.1in; }
@@ -136,7 +148,7 @@ body{
     </div>
     <div class="der">
       <div class="refs-caja">
-        <div class="refs">{{#referencias}}<img src="{{{src}}}" alt="Referencia del diseño">{{/referencias}}</div>
+        {{#referencias.length}}<div class="refs {{referencias_clase}}">{{#referencias}}<img src="{{{src}}}" alt="Referencia del diseño">{{/referencias}}</div>{{/referencias.length}}
         {{^referencias}}<div class="sin-ref">Sin imagen de referencia</div>{{/referencias}}
         {{#referencias_leyenda}}<div class="refs-leyenda">{{.}}</div>{{/referencias_leyenda}}
       </div>
@@ -146,11 +158,13 @@ body{
   <h2 class="seccion">Detalles del pastel</h2>
 
   <div class="bloque detalle">
-    <div class="izq">
-      {{#detalles}}
-      {{#subtitulo}}<div class="subtitulo-fila">{{.}}</div>{{/subtitulo}}
-      {{^subtitulo}}<div class="fila"><span class="et">{{etiqueta}}</span> {{valor}}</div>{{/subtitulo}}
-      {{/detalles}}
+    <div class="izq{{#varios_pasteles}} varios{{/varios_pasteles}}">
+      {{#pasteles}}
+      <div class="grupo-pastel">
+        {{#subtitulo}}<div class="subtitulo-fila">{{.}}</div>{{/subtitulo}}
+        {{#filas}}<div class="fila"><span class="et">{{etiqueta}}</span> {{valor}}</div>{{/filas}}
+      </div>
+      {{/pasteles}}
     </div>
     <div class="der costos">
       <div class="et">Costo</div>
