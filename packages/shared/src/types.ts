@@ -119,6 +119,10 @@ export interface Conversacion {
   totalMensajes?: number;
   pedidoId?: string | null;
   pedidoEstado?: Estado | null;
+  /** Lectura con IA en curso en el servidor (sobrevive a recargar la página). */
+  lectura?: { tipo: 'resumen' | 'pedido'; desde: string } | null;
+  /** Motivo del último intento fallido de lectura, si lo hubo. */
+  lecturaError?: string | null;
   creado: string;
 }
 

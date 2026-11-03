@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Ctx } from '../context.js';
 import { ExtractorNoDisponible } from '../services/extraction.js';
 import { crearPedido, generarLink, pedidoDesdeExtraccion } from '../services/orders.js';
-import { borrarConversacion, getConversacion, importarChat, listarConversaciones, vistaPrevia } from '../services/conversations.js';
+import { borrarConversacion, conLectura, getConversacion, importarChat, LecturaEnCurso, listarConversaciones, vistaPrevia } from '../services/conversations.js';
 import { getAjustes } from '../services/settings.js';
 import { requiereUsuario, usuarioActual } from './auth.js';
 
@@ -60,14 +60,18 @@ export async function conversacionesRoutes(app: FastifyInstance, ctx: Ctx) {
     const c = await getConversacion(db, req.params.id);
     if (!c) return reply.code(404).send({ error: 'No existe la conversación.' });
     try {
-      const ext = await ctx.extractor.extraer(
-        c.mensajes.map((m) => ({ indice: m.indice, rol: m.rol, enviado: m.enviado, texto: m.texto, tipo: m.tipo })),
-      );
-      await db.query('update conversaciones set resumen = $2, extraccion = $3, cliente_nombre = coalesce(cliente_nombre, nullif($4, \'\')) where id = $1', [
-        c.conversacion.id, ext.resumen, JSON.stringify(ext), ext.cliente_nombre,
-      ]);
-      return { resumen: ext.resumen, extraccion: ext };
+      // Si el navegador se recarga, la lectura sigue aquí y el resultado se guarda igual.
+      return await conLectura(db, c.conversacion.id, 'resumen', async () => {
+        const ext = await ctx.extractor.extraer(
+          c.mensajes.map((m) => ({ indice: m.indice, rol: m.rol, enviado: m.enviado, texto: m.texto, tipo: m.tipo })),
+        );
+        await db.query('update conversaciones set resumen = $2, extraccion = $3, cliente_nombre = coalesce(cliente_nombre, nullif($4, \'\')) where id = $1', [
+          c.conversacion.id, ext.resumen, JSON.stringify(ext), ext.cliente_nombre,
+        ]);
+        return { resumen: ext.resumen, extraccion: ext };
+      });
     } catch (e) {
+      if (e instanceof LecturaEnCurso) return reply.code(409).send({ error: e.message, enCurso: true });
       if (e instanceof ExtractorNoDisponible) return reply.code(503).send({ error: e.message });
       return errorDelModelo(req, reply, e);
     }
@@ -78,31 +82,37 @@ export async function conversacionesRoutes(app: FastifyInstance, ctx: Ctx) {
     const c = await getConversacion(db, req.params.id);
     if (!c) return reply.code(404).send({ error: 'No existe la conversación.' });
     if (c.conversacion.pedidoId) return { id: c.conversacion.pedidoId, existente: true };
-    let ext = c.extraccion as Parameters<typeof pedidoDesdeExtraccion>[0] | null;
     try {
-      if (!ext) {
-        ext = await ctx.extractor.extraer(
-          c.mensajes.map((m) => ({ indice: m.indice, rol: m.rol, enviado: m.enviado, texto: m.texto, tipo: m.tipo })),
+      // Todo el armado del pedido va bajo la misma marca: un doble clic no crea dos pedidos.
+      return await conLectura(db, c.conversacion.id, 'pedido', async () => {
+        const ya = await db.query<{ id: string }>('select id from pedidos where conversacion_id = $1 limit 1', [c.conversacion.id]);
+        if (ya.rows[0]) return { id: ya.rows[0].id, existente: true };
+        let ext = c.extraccion as Parameters<typeof pedidoDesdeExtraccion>[0] | null;
+        if (!ext) {
+          ext = await ctx.extractor.extraer(
+            c.mensajes.map((m) => ({ indice: m.indice, rol: m.rol, enviado: m.enviado, texto: m.texto, tipo: m.tipo })),
+          );
+          await db.query('update conversaciones set resumen = $2, extraccion = $3 where id = $1', [c.conversacion.id, ext.resumen, JSON.stringify(ext)]);
+        }
+        const datos = pedidoDesdeExtraccion(ext);
+        const p = await crearPedido(
+          db,
+          {
+            ...datos,
+            clienteNombre: datos.clienteNombre ?? c.conversacion.clienteNombre,
+            clienteTelefono: c.conversacion.clienteTelefono,
+            conversacionId: c.conversacion.id,
+            esPrueba: c.conversacion.esPrueba,
+          },
+          usuarioActual(req)!.email,
         );
-        await db.query('update conversaciones set resumen = $2, extraccion = $3 where id = $1', [c.conversacion.id, ext.resumen, JSON.stringify(ext)]);
-      }
+        return { id: p.id, existente: false };
+      });
     } catch (e) {
+      if (e instanceof LecturaEnCurso) return reply.code(409).send({ error: e.message, enCurso: true });
       if (e instanceof ExtractorNoDisponible) return reply.code(503).send({ error: e.message });
       return errorDelModelo(req, reply, e);
     }
-    const datos = pedidoDesdeExtraccion(ext);
-    const p = await crearPedido(
-      db,
-      {
-        ...datos,
-        clienteNombre: datos.clienteNombre ?? c.conversacion.clienteNombre,
-        clienteTelefono: c.conversacion.clienteTelefono,
-        conversacionId: c.conversacion.id,
-        esPrueba: c.conversacion.esPrueba,
-      },
-      usuarioActual(req)!.email,
-    );
-    return { id: p.id, existente: false };
   });
 
   /** Link para que el cliente llene su pedido. Crea un pedido vacío si la conversación no tiene. */
