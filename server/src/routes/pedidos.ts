@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import {
   cambiarEstado,
   crearPedido,
   desactivarLink,
+  eliminarPedido,
   ErrorDeNegocio,
   generarLink,
   getPedido,
@@ -154,6 +155,32 @@ export async function pedidosRoutes(app: FastifyInstance, ctx: Ctx) {
     const token = await generarLink(db, req.params.id, aj.link_dias_validez, yo(req));
     if (!token) return reply.code(404).send({ error: 'No existe el pedido.' });
     return { url: `${config.PUBLIC_URL}/p/${token}` };
+  });
+
+  /** Solo el dueño. Borra también el evento de Google Calendar y los archivos en disco. */
+  app.delete<{ Params: { id: string } }>('/api/pedidos/:id', { preHandler: requiereUsuario('dueno') }, async (req, reply) => {
+    const p = await getPedido(db, req.params.id);
+    if (!p) return reply.code(404).send({ error: 'No existe el pedido.' });
+
+    // El evento se borra antes que el pedido: después ya no habría con qué encontrarlo.
+    let avisoCalendario: string | null = null;
+    if (p.eventoCalendarioId) {
+      if (!ctx.calendario.disponible) avisoCalendario = 'Google Calendar no está conectado: borra el evento a mano.';
+      else {
+        try {
+          await ctx.calendario.borrar(p.eventoCalendarioId);
+        } catch (e) {
+          req.log.error(e, 'No se pudo borrar el evento del pedido eliminado');
+          avisoCalendario = `No se pudo borrar el evento de Google Calendar (${(e as Error).message.slice(0, 160)}). Bórralo a mano.`;
+        }
+      }
+    }
+
+    const r = await eliminarPedido(db, p.id, yo(req));
+    if (!r) return reply.code(404).send({ error: 'No existe el pedido.' });
+    for (const a of r.archivos) await rm(rutaSegura(config.STORAGE_DIR, a), { force: true }).catch((e) => req.log.warn(e, 'Archivo no borrado'));
+    await rm(rutaSegura(config.STORAGE_DIR, join('referencias', p.id)), { recursive: true, force: true }).catch(() => undefined);
+    return { ok: true, folio: r.folio, avisoCalendario };
   });
 
   app.delete<{ Params: { id: string } }>('/api/pedidos/:id/link', async (req) => {

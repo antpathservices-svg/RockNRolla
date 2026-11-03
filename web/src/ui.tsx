@@ -151,6 +151,20 @@ export function useDialogo() {
   };
 }
 
+/** true mientras la pantalla mida a lo más `max` px de ancho (celular o tableta). */
+export function useAngosto(max: number): boolean {
+  const consulta = `(max-width: ${max}px)`;
+  const [si, setSi] = useState(() => typeof window !== 'undefined' && window.matchMedia(consulta).matches);
+  useEffect(() => {
+    const m = window.matchMedia(consulta);
+    const f = () => setSi(m.matches);
+    f();
+    m.addEventListener('change', f);
+    return () => m.removeEventListener('change', f);
+  }, [consulta]);
+  return si;
+}
+
 /** Carga datos con estado de error y recarga. */
 export function useCarga<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);

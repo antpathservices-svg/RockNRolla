@@ -108,9 +108,9 @@ export function Calendario() {
       <div className="fila" style={{ gap: 12 }}>
         <h1>Calendario</h1>
         <div className="fila" style={{ marginLeft: 'auto', gap: 8 }}>
-          <button type="button" className="btn" aria-label="Mes anterior" onClick={() => set({ mes: moverMes(mes, -1), dia: null })}>‹</button>
+          <button type="button" className="btn" style={{ minWidth: 44, padding: 0 }} aria-label="Mes anterior" onClick={() => set({ mes: moverMes(mes, -1), dia: null })}>‹</button>
           <button type="button" className="btn" onClick={() => set({ mes: null, dia: null })}>Hoy</button>
-          <button type="button" className="btn" aria-label="Mes siguiente" onClick={() => set({ mes: moverMes(mes, 1), dia: null })}>›</button>
+          <button type="button" className="btn" style={{ minWidth: 44, padding: 0 }} aria-label="Mes siguiente" onClick={() => set({ mes: moverMes(mes, 1), dia: null })}>›</button>
         </div>
       </div>
 
@@ -121,12 +121,12 @@ export function Calendario() {
             {pendientes > 0 && <> <strong>{pendientes} {pendientes === 1 ? 'pedido aún no aparece' : 'pedidos aún no aparecen'} en Google.</strong></>}
           </span>
           <span className="fila" style={{ marginLeft: 'auto', gap: 6 }}>
-            <button type="button" className="btn texto" style={{ color: 'var(--verde)', minHeight: 32 }} onClick={() => setFresco((n) => n + 1)} disabled={vista.cargando}>Actualizar</button>
-            <button type="button" className="btn texto" style={{ color: 'var(--verde)', minHeight: 32 }} onClick={sincronizar} disabled={sincronizando}>
+            <button type="button" className="btn texto" style={{ color: 'var(--verde)' }} onClick={() => setFresco((n) => n + 1)} disabled={vista.cargando}>Actualizar</button>
+            <button type="button" className="btn texto" style={{ color: 'var(--verde)' }} onClick={sincronizar} disabled={sincronizando}>
               {sincronizando ? 'Sincronizando…' : 'Sincronizar ahora'}
             </button>
             {usuario.rol === 'dueno' && (
-              <a className="btn texto" style={{ color: 'var(--verde)', minHeight: 32 }} href={`https://calendar.google.com/calendar/r/month/${anio}/${numMes}/1`} target="_blank" rel="noreferrer">Abrir Google Calendar</a>
+              <a className="btn texto" style={{ color: 'var(--verde)' }} href={`https://calendar.google.com/calendar/r/month/${anio}/${numMes}/1`} target="_blank" rel="noreferrer">Abrir Google Calendar</a>
             )}
           </span>
         </div>

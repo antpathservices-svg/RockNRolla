@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { calcularMontos, ESTADOS, ETIQUETA_ESTADO, formatoPesos, parsePesos, type Estado, type Mensaje } from '@rnr/shared';
+import { Link, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import type { PanelCtx } from '../App';
+import { calcularMontos, ESTADOS, ETIQUETA_ESTADO, formatoPesos, parsePesos, SIGUIENTE_ESTADO, type Estado, type Mensaje } from '@rnr/shared';
 import { ApiError, type Ajustes, type PastelEditable, type PedidoDetalle } from '../api';
-import { api, copiar, diaMensaje, EstadoChip, fechaCorta, horaMensaje, hoy, Icono, useCarga, useDialogo, useToast } from '../ui';
+import { api, copiar, diaMensaje, EstadoChip, fechaCorta, horaMensaje, hoy, Icono, useAngosto, useCarga, useDialogo, useToast } from '../ui';
 
 type Form = Omit<PedidoDetalle, 'pasteles'> & { pasteles: PastelEditable[] };
 
@@ -18,6 +19,10 @@ const pastelVacio = (): PastelEditable => ({
 
 export function PedidoPage() {
   const { id } = useParams();
+  const { usuario } = useOutletContext<PanelCtx>();
+  const navigate = useNavigate();
+  const [eliminando, setEliminando] = useState(false);
+  const angosto = useAngosto(1023);
   const toast = useToast();
   const dialogo = useDialogo();
   const carga = useCarga(() => api.pedido(id!), [id]);
@@ -114,6 +119,27 @@ export function PedidoPage() {
     }
   }
 
+  async function eliminar() {
+    if (!carga.data) return;
+    const p = carga.data;
+    const ok = await dialogo.confirmar(
+      `¿Eliminar el pedido ${p.folio}?`,
+      'Eliminar para siempre',
+      `Se borran ${p.clienteNombre ? `el pedido de ${p.clienteNombre}` : 'el pedido'}, sus fotos y sus notas en PDF${p.eventoCalendarioId ? ', y su evento en Google Calendar' : ''}. No se puede deshacer.`,
+    );
+    if (!ok) return;
+    setEliminando(true);
+    try {
+      const r = await api.eliminarPedido(p.id);
+      setSucio(false);
+      toast(r.avisoCalendario ? `Pedido ${r.folio} eliminado. ${r.avisoCalendario}` : `Pedido ${r.folio} eliminado.`);
+      navigate('/pedidos', { replace: true });
+    } catch (e) {
+      toast((e as Error).message);
+      setEliminando(false);
+    }
+  }
+
   async function cambiarEstado(e: Estado) {
     let motivo: string | undefined;
     if (e === 'cancelado') {
@@ -144,14 +170,23 @@ export function PedidoPage() {
   const cuentas = ajustes.data?.cuentas_cobro ?? [];
 
   return (
-    <main className="contenido">
-      <div className="fila" style={{ gap: 12 }}>
-        <Link to="/pedidos" style={{ fontSize: 14, textDecoration: 'none' }}>← Pedidos</Link>
-        <h1 style={{ fontSize: 22 }}>Pedido {p.folio}{form.clienteNombre ? ` · ${form.clienteNombre}` : ''}</h1>
-        <EstadoChip estado={p.estado} vencida={vencida} />
-        {p.esPrueba && <span className="chip prueba">Prueba</span>}
-        {p.estado === 'cotizando' && p.vigenciaHasta && <span className="muted" style={{ marginLeft: 'auto' }}>Vigencia: hasta el {fechaCorta(p.vigenciaHasta)}</span>}
-        {p.conversacionId && <Link className="btn" to={`/conversaciones/${p.conversacionId}`}>Ver chat</Link>}
+    <main className={`contenido${angosto ? ' con-barra' : ''}`}>
+      <div className="encabezado-pedido">
+        <Link to="/pedidos" className="volver"><Icono.atras />Pedidos</Link>
+        <h1>Pedido {p.folio}{form.clienteNombre ? ` · ${form.clienteNombre}` : ''}</h1>
+        <div className="fila" style={{ gap: 8 }}>
+          <EstadoChip estado={p.estado} vencida={vencida} />
+          {p.esPrueba && <span className="chip prueba">Prueba</span>}
+          {p.estado === 'cotizando' && p.vigenciaHasta && <span className="muted">Vigencia: hasta el {fechaCorta(p.vigenciaHasta)}</span>}
+        </div>
+        <div className="fila acciones-encabezado" style={{ gap: 8 }}>
+          {SIGUIENTE_ESTADO[p.estado] && !vencida && p.estado !== 'cotizando' && (
+            <button type="button" className="btn secundario" onClick={() => cambiarEstado(SIGUIENTE_ESTADO[p.estado]!)}>
+              Pasar a {ETIQUETA_ESTADO[SIGUIENTE_ESTADO[p.estado]!]}
+            </button>
+          )}
+          {p.conversacionId && <Link className="btn" to={`/conversaciones/${p.conversacionId}`}>Ver chat</Link>}
+        </div>
       </div>
 
       {p.formularioRecibidoEn && p.estado === 'cotizando' && (
@@ -182,7 +217,7 @@ export function PedidoPage() {
             </Campo>
             <fieldset className="campo col-completa" style={{ border: 0, margin: 0, padding: 0 }}>
               <legend className="etiqueta" style={{ fontSize: 12, color: 'var(--gris)', padding: 0, marginBottom: 4 }}>Fecha y hora de entrega</legend>
-              <div className="fila" style={{ gap: 6, maxWidth: 520 }}>
+              <div className="fila fila-fecha" style={{ gap: 6, maxWidth: 520 }}>
                 <label htmlFor="fecha" className="sr">Fecha</label>
                 <input id="fecha" type="date" value={form.fechaEntrega ?? ''} onChange={(e) => cambiar({ fechaEntrega: e.target.value || null })} style={{ flex: '1 1 140px' }} />
                 <label htmlFor="desde" className="sr">Desde</label>
@@ -289,12 +324,14 @@ export function PedidoPage() {
 
           <Referencias p={p} onCambio={carga.recargar} />
 
-          {sucio && <button type="button" className="btn grande" disabled={ocupado !== null} onClick={() => guardar()}>{ocupado === 'guardar' ? 'Guardando…' : 'Guardar cambios'}</button>}
+          {!angosto && sucio && <button type="button" className="btn grande" disabled={ocupado !== null} onClick={() => guardar()}>{ocupado === 'guardar' ? 'Guardando…' : 'Guardar cambios'}</button>}
           {pendientes.length > 0 && <p id="aprobar-ayuda" className="small" style={{ color: '#6b4e00', fontWeight: 600 }}>{pendientes[0]}</p>}
-          <button type="button" className="btn primario grande" aria-describedby={pendientes.length ? 'aprobar-ayuda' : undefined}
-            disabled={ocupado !== null || (!sucio && p.pendientes.length > 0)} onClick={aprobar}>
-            {ocupado === 'aprobar' ? 'Generando la nota…' : p.notas.length ? 'Aprobar y generar nueva versión' : 'Aprobar y generar nota'}
-          </button>
+          {!angosto && (
+            <button type="button" className="btn primario grande" aria-describedby={pendientes.length ? 'aprobar-ayuda' : undefined}
+              disabled={ocupado !== null || (!sucio && p.pendientes.length > 0)} onClick={aprobar}>
+              {ocupado === 'aprobar' ? 'Generando la nota…' : p.notas.length ? 'Aprobar y generar nueva versión' : 'Aprobar y generar nota'}
+            </button>
+          )}
           {p.notas.length > 0 && (
             <div className="tarjeta" style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <strong style={{ fontSize: 14 }}>Notas generadas</strong>
@@ -336,8 +373,40 @@ export function PedidoPage() {
             {p.tokenActivo && <button type="button" className="btn texto" style={{ alignSelf: 'flex-start' }}
               onClick={async () => { await api.desactivarLink(p.id); setLinkCliente(null); carga.recargar(); }}>Desactivar link</button>}
           </section>
+
+          {usuario.rol === 'dueno' && (
+            <section className="tarjeta" style={{ display: 'flex', flexDirection: 'column', gap: 10, borderColor: '#e9c7c7' }}>
+              <h2>Eliminar pedido</h2>
+              <p className="small muted">
+                Lo borra para siempre, con sus fotos, notas en PDF{p.eventoCalendarioId ? ' y su evento en Google Calendar' : ''}. La conversación se conserva.
+                Si el pedido solo no se concretó, mejor cancélalo: así queda en el historial.
+              </p>
+              <button type="button" className="btn peligro" style={{ alignSelf: 'flex-start' }} disabled={eliminando} onClick={eliminar}>
+                {eliminando ? 'Eliminando…' : 'Eliminar pedido'}
+              </button>
+            </section>
+          )}
         </aside>
       </div>
+
+      {angosto && (
+        <div className="barra-accion" role="region" aria-label="Total y acción principal">
+          <div className="montos">
+            <strong>{formatoPesos(montos.total)}</strong>
+            <span className="small muted">Anticipo {formatoPesos(montos.anticipo)}</span>
+          </div>
+          {sucio ? (
+            <button type="button" className="btn primario grande" disabled={ocupado !== null} onClick={() => guardar()}>
+              {ocupado === 'guardar' ? 'Guardando…' : 'Guardar cambios'}
+            </button>
+          ) : (
+            <button type="button" className="btn primario grande" aria-describedby={pendientes.length ? 'aprobar-ayuda' : undefined}
+              disabled={ocupado !== null || p.pendientes.length > 0} onClick={aprobar}>
+              {ocupado === 'aprobar' ? 'Generando…' : p.pendientes.length > 0 ? 'Falta para aprobar' : p.notas.length ? 'Aprobar nueva versión' : 'Aprobar y generar nota'}
+            </button>
+          )}
+        </div>
+      )}
     </main>
   );
 }

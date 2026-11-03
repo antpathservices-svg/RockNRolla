@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import type { PanelCtx } from '../App';
 import type { Ajustes, Conexiones } from '../api';
 import { api, copiar, useCarga, useDialogo, useToast } from '../ui';
@@ -14,6 +14,7 @@ const ESTADO_CON: Record<string, { texto: string; clase: string }> = {
 export function Configuracion() {
   const { usuario } = useOutletContext<PanelCtx>();
   const esDueno = usuario.rol === 'dueno';
+  const navigate = useNavigate();
   const toast = useToast();
   const dialogo = useDialogo();
   const con = useCarga(() => api.conexiones(), []);
@@ -148,6 +149,11 @@ export function Configuracion() {
           </form>
         </section>
       )}
+      {/* En celular y tableta la barra de navegación no tiene espacio para la sesión: vive aquí */}
+      <section className="tarjeta fila sesion-movil" style={{ justifyContent: 'space-between' }}>
+        <span className="muted">Sesión: <strong style={{ color: 'var(--texto)' }}>{usuario.nombre ?? usuario.email}</strong> · {esDueno ? 'Dueño' : 'Operador'}</span>
+        {!api.demo && <button type="button" className="btn" onClick={async () => { await api.salir(); navigate('/entrar'); }}>Cerrar sesión</button>}
+      </section>
     </main>
   );
 }

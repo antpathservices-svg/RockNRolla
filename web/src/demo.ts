@@ -304,6 +304,12 @@ export const demoApi: Api = {
     p.tokenActivo = true; p.tokenPublico = `demo-${p.id}`;
     return pausa({ url: `#/p/${p.tokenPublico}` });
   },
+  async eliminarPedido(id) {
+    const i = pedidos.findIndex((x) => x.id === id);
+    if (i < 0) throw new ApiError('No existe el pedido.', 404);
+    const [p] = pedidos.splice(i, 1);
+    return pausa({ folio: p.folio, avisoCalendario: null });
+  },
   async desactivarLink(id) { const p = pedidos.find((x) => x.id === id)!; p.tokenActivo = false; p.tokenPublico = null; },
   async subirReferencia(id, file) {
     const p = pedidos.find((x) => x.id === id)!;

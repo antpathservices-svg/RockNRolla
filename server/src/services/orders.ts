@@ -368,6 +368,31 @@ export async function generarLink(db: Db, id: string, dias: number, usuario: str
   return token;
 }
 
+/**
+ * Borra el pedido para siempre: pasteles, fotos y notas se van en cascada; la conversación se
+ * conserva (queda sin pedido) y el folio no se vuelve a usar. Devuelve los archivos a borrar
+ * del disco, o null si no existía. La bitácora guarda quién lo borró y qué era.
+ */
+export async function eliminarPedido(db: Db, id: string, usuario: string): Promise<{ folio: string; archivos: string[] } | null> {
+  return tx(db, async (c) => {
+    const { rows } = await c.query<{ folio: string; estado: string; cliente_nombre: string | null; fecha_entrega: string | null }>(
+      `select folio, estado, cliente_nombre, to_char(fecha_entrega, 'YYYY-MM-DD') as fecha_entrega from pedidos where id = $1 for update`,
+      [id],
+    );
+    const p = rows[0];
+    if (!p) return null;
+    const archivos = await c.query<{ archivo: string }>(
+      'select archivo from referencias where pedido_id = $1 union all select archivo from notas where pedido_id = $1',
+      [id],
+    );
+    await c.query('delete from pedidos where id = $1', [id]);
+    await registrar(c, 'pedido', id, 'pedido_eliminado', usuario, {
+      folio: p.folio, estado: p.estado, cliente: p.cliente_nombre, fechaEntrega: p.fecha_entrega,
+    });
+    return { folio: p.folio, archivos: archivos.rows.map((r) => r.archivo) };
+  });
+}
+
 export async function desactivarLink(db: Db, id: string, usuario: string | null): Promise<void> {
   await db.query('update pedidos set token_activo = false, actualizado = now() where id = $1', [id]);
   await registrar(db, 'pedido', id, 'link_desactivado', usuario);

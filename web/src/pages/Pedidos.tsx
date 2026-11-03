@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ESTADOS, ETIQUETA_ESTADO, SIGUIENTE_ESTADO, type Estado } from '@rnr/shared';
 import type { PedidoFila } from '../api';
-import { api, EstadoChip, fechaCorta, hoy, semaforo, useCarga, useDialogo, useToast } from '../ui';
+import { api, EstadoChip, fechaCorta, hoy, semaforo, useAngosto, useCarga, useDialogo, useToast } from '../ui';
 
 const COLOR_BOTON: Partial<Record<Estado, string>> = {
   aceptado: 'var(--azul)', en_preparacion: 'var(--morado)', listo: 'var(--verde)', completado: 'var(--texto-2)',
@@ -24,6 +24,7 @@ export function Pedidos() {
   const orden = (params.get('orden') as 'fecha' | 'estado' | null) ?? 'fecha';
   const [q, setQ] = useState(params.get('q') ?? '');
   const [busqueda, setBusqueda] = useState(q);
+  const tarjetas = useAngosto(1023);
 
   useEffect(() => {
     const t = setTimeout(() => setBusqueda(q.trim()), 300);
@@ -72,23 +73,66 @@ export function Pedidos() {
         <input id="buscar-pedido" type="search" placeholder="Ej.: Ana o 0012" value={q} onChange={(e) => { setQ(e.target.value); set('q', e.target.value || null); }} />
       </div>
 
-      <div role="group" aria-label="Filtrar pedidos" className="fila">
-        <button type="button" className="filtro" aria-pressed={!estado} onClick={() => set('estado', null)}>Todos</button>
-        {ESTADOS.map((e) => (
-          <button key={e} type="button" className="filtro" aria-pressed={estado === e} onClick={() => set('estado', estado === e ? null : e)}>{ETIQUETA_ESTADO[e]}</button>
-        ))}
-        <span aria-hidden="true" style={{ width: 1, height: 24, background: 'var(--borde-input)' }} />
-        <button type="button" className="filtro" aria-pressed={semana} onClick={() => set('semana', semana ? null : '1')}>Entregas de esta semana</button>
-        <label htmlFor="orden" className="muted" style={{ marginLeft: 'auto' }}>Ordenar por</label>
-        <select id="orden" style={{ width: 'auto' }} value={orden} onChange={(e) => set('orden', e.target.value === 'fecha' ? null : e.target.value)}>
-          <option value="fecha">Fecha de entrega</option>
-          <option value="estado">Estado</option>
-        </select>
+      <div className="filtros-pedidos">
+        <div role="group" aria-label="Filtrar pedidos" className="chips-scroll">
+          <button type="button" className="filtro" aria-pressed={semana} onClick={() => set('semana', semana ? null : '1')}>Esta semana</button>
+          <span aria-hidden="true" className="separador-v" />
+          <button type="button" className="filtro" aria-pressed={!estado} onClick={() => set('estado', null)}>Todos</button>
+          {ESTADOS.map((e) => (
+            <button key={e} type="button" className="filtro" aria-pressed={estado === e} onClick={() => set('estado', estado === e ? null : e)}>{ETIQUETA_ESTADO[e]}</button>
+          ))}
+        </div>
+        <div className="fila orden">
+          <label htmlFor="orden" className="muted">Ordenar por</label>
+          <select id="orden" style={{ width: 'auto' }} value={orden} onChange={(e) => set('orden', e.target.value === 'fecha' ? null : e.target.value)}>
+            <option value="fecha">Fecha de entrega</option>
+            <option value="estado">Estado</option>
+          </select>
+        </div>
       </div>
 
       {lista.error && <div className="aviso rojo" role="alert">{lista.error}</div>}
       {lista.data && lista.data.length === 0 && <p className="muted">No hay pedidos con estos filtros.</p>}
-      {lista.data && lista.data.length > 0 && (
+      {lista.data && lista.data.length > 0 && tarjetas && (
+        <ul className="tarjetas-pedido">
+          {lista.data.map((p) => {
+            const vencida = p.estado === 'cotizando' && Boolean(p.vigenciaHasta && p.vigenciaHasta < hoy());
+            const s = vencida ? { color: '#9a9092', texto: 'Cotización vencida', tono: 'var(--gris)' } : semaforo(p.fechaEntrega, p.estado);
+            const sig = SIGUIENTE_ESTADO[p.estado];
+            return (
+              <li key={p.id} className="tarjeta-pedido">
+                <Link to={`/pedidos/${p.id}`} className="cuerpo">
+                  <div className="fila" style={{ flexWrap: 'nowrap' }}>
+                    <strong className="nombre">{p.clienteNombre ?? 'Sin nombre'}</strong>
+                    <span style={{ marginLeft: 'auto' }}><EstadoChip estado={p.estado} vencida={vencida} /></span>
+                  </div>
+                  <div className="fila" style={{ flexWrap: 'nowrap', gap: 8 }}>
+                    <span className="punto" style={{ background: s.color }} aria-hidden="true" />
+                    <span style={{ fontWeight: 600 }}>{fechaCorta(p.fechaEntrega, p.horaDesde)}</span>
+                    <span className="small" style={{ color: s.tono }}>{s.texto}</span>
+                  </div>
+                  <div className="small muted">
+                    {[p.folio, p.temas, p.festejados, p.totalPasteles > 1 ? `${p.totalPasteles} pasteles` : p.personas ? `${p.personas} personas` : null].filter(Boolean).join(' · ')}
+                    {p.esPrueba && <> · <span className="chip prueba">Prueba</span></>}
+                  </div>
+                </Link>
+                {(vencida || sig) && (
+                  <div className="acciones">
+                    {vencida ? (
+                      <button type="button" className="btn peligro" onClick={() => avanzar(p, 'cancelado')}>Cancelar</button>
+                    ) : sig ? (
+                      <button type="button" className="btn" style={{ borderColor: COLOR_BOTON[sig], color: COLOR_BOTON[sig], fontWeight: 600 }} onClick={() => avanzar(p, sig)}>
+                        Pasar a {sig === 'aceptado' ? 'Aceptado · anticipo recibido' : ETIQUETA_ESTADO[sig]}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {lista.data && lista.data.length > 0 && !tarjetas && (
         <div className="tabla-caja">
           <table>
             <thead>
@@ -137,7 +181,7 @@ export function Pedidos() {
           </table>
         </div>
       )}
-      <p className="muted">Cada fecha lleva su texto (faltan días, mañana, venció); el punto de color solo lo refuerza. Toca el nombre del cliente para abrir el pedido.</p>
+      {!tarjetas && <p className="muted">Cada fecha lleva su texto (faltan días, mañana, venció); el punto de color solo lo refuerza. Toca el nombre del cliente para abrir el pedido.</p>}
     </main>
   );
 }
