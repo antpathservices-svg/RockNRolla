@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Pedido } from '@rnr/shared';
 import { loadConfig } from '../src/config.js';
-import { crearCalendario, eventoDesdePedido, leerLlave } from '../src/services/calendar.js';
+import { crearCalendario, eventoDesdeGoogle, eventoDesdePedido, leerLlave } from '../src/services/calendar.js';
 
 const LLAVE = {
   type: 'service_account',
@@ -110,5 +110,28 @@ describe('calendario con cuenta de servicio', () => {
     expect(ev.summary.startsWith('[PRUEBA]')).toBe(true);
     expect(ev.start).toEqual({ date: '2026-11-20' });
     expect(ev.end).toEqual({ date: '2026-11-21' });
+  });
+});
+
+describe('leer el calendario', () => {
+  it('convierte eventos de Google a hora de Monterrey', () => {
+    expect(eventoDesdeGoogle({ id: 'a', summary: 'Cita', start: { dateTime: '2026-11-20T23:30:00Z' }, end: { dateTime: '2026-11-21T00:30:00Z' } }))
+      .toMatchObject({ fecha: '2026-11-20', fechaFin: '2026-11-20', horaDesde: '17:30', horaHasta: '18:30', todoElDia: false, pedidoId: null });
+    expect(eventoDesdeGoogle({ id: 'b', start: { date: '2026-11-20' }, end: { date: '2026-11-23' }, extendedProperties: { private: { pedidoId: 'p9' } } }))
+      .toMatchObject({ titulo: '(Sin título)', fecha: '2026-11-20', fechaFin: '2026-11-22', todoElDia: true, pedidoId: 'p9' });
+    expect(eventoDesdeGoogle({ id: 'c', status: 'cancelled', start: { date: '2026-11-20' } })).toBeNull();
+  });
+
+  it('pide el rango en hora de Monterrey y sigue las páginas', async () => {
+    const g = googleFalso((_m, url) => url.includes('pageToken')
+      ? { status: 200, body: { items: [{ id: '2', summary: 'B', start: { date: '2026-11-05' }, end: { date: '2026-11-06' } }] } }
+      : { status: 200, body: { items: [{ id: '1', summary: 'A', start: { date: '2026-11-04' }, end: { date: '2026-11-05' } }], nextPageToken: 'sig' } });
+    const c = crearCalendario(cfg({ GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify(LLAVE), GOOGLE_CALENDAR_ID: 'dueno@gmail.com' }), g.f, async () => 'tok');
+    const evs = await c.listar('2026-11-01', '2026-11-30');
+    expect(evs.map((e) => e.titulo)).toEqual(['A', 'B']);
+    const u = new URL(g.llamadas[0].url);
+    expect(u.searchParams.get('timeMin')).toBe('2026-11-01T00:00:00-06:00');
+    expect(u.searchParams.get('timeMax')).toBe('2026-12-01T00:00:00-06:00');
+    expect(u.searchParams.get('singleEvents')).toBe('true');
   });
 });

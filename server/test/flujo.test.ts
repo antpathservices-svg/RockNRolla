@@ -17,7 +17,7 @@ import { loadConfig } from '../src/config.js';
 import type { Ctx } from '../src/context.js';
 import { createPool, type Db } from '../src/db.js';
 import { migrate } from '../src/migrate.js';
-import type { Calendario } from '../src/services/calendar.js';
+import type { Calendario, EventoCalendario } from '../src/services/calendar.js';
 import { sincronizarEvento } from '../src/services/jobs.js';
 import { GeneradorPdf } from '../src/services/pdf.js';
 
@@ -60,6 +60,7 @@ describe.skipIf(!URL)('flujo completo', () => {
   let ctx: Ctx;
   let cookie = '';
   const eventos: string[] = [];
+  const eventosGoogle: EventoCalendario[] = [];
   const recibidoPorModelo: string[] = [];
 
   const calendario: Calendario = {
@@ -70,6 +71,7 @@ describe.skipIf(!URL)('flujo completo', () => {
     async actualizar(id) { eventos.push(`actualizar ${id}`); return id; },
     async borrar(id) { eventos.push(`borrar ${id}`); },
     async probar() {},
+    async listar() { return eventosGoogle; },
   };
 
   const pedir = async (method: string, url: string, body?: unknown) => {
@@ -256,6 +258,30 @@ describe.skipIf(!URL)('flujo completo', () => {
     expect(verif.body).toBe('123');
   });
 
+  it('el calendario junta pedidos y eventos de Google sin duplicar', async () => {
+    const nuevo = await pedir('POST', '/api/pedidos', { clienteNombre: 'Calendario Ejemplo', fechaEntrega: '2026-12-10', horaDesde: '15:00' });
+    const id = nuevo.json().id;
+    const r0 = await pedir('POST', `/api/pedidos/${id}/estado`, { estado: 'aceptado' });
+    expect(r0.status).toBe(200);
+    const ext = { fechaFin: '2026-12-10', horaDesde: null, horaHasta: null, todoElDia: true, enlace: 'https://calendar.google.com/x', ubicacion: 'Casa' };
+    eventosGoogle.push(
+      { ...ext, id: 'g-ped', titulo: 'evento del pedido', fecha: '2026-12-10', pedidoId: id },
+      { ...ext, id: 'g-otro', titulo: 'Cita personal', fecha: '2026-12-10', pedidoId: null },
+    );
+    const r = await pedir('GET', '/api/calendario?desde=2026-12-01&hasta=2026-12-31');
+    expect(r.status).toBe(200);
+    const v = r.json();
+    expect(v.google.estado).toBe('conectado');
+    expect(v.pedidos.map((p: { id: string }) => p.id)).toEqual([id]);
+    expect(v.pedidos[0]).toMatchObject({ sincronizacion: 'conectado', horaDesde: '15:00' });
+    expect(v.eventos).toHaveLength(1); // el del pedido no se repite
+    expect(v.eventos[0].titulo).toBe('Cita personal');
+
+    expect((await pedir('GET', '/api/calendario?desde=2026-12-01&hasta=2027-06-01')).status).toBe(400);
+    const s = await pedir('POST', '/api/calendario/sincronizar', { desde: '2026-12-01', hasta: '2026-12-31' });
+    expect(s.json()).toEqual({ encolados: 1 });
+  });
+
   it('el operador no puede cambiar ajustes del dueño', async () => {
     await db.query(`insert into usuarios (email, rol) values ('operador@ejemplo.mx', 'operador')`);
     await db.query(`update usuarios set email = 'otro@ejemplo.mx' where email = 'duena@ejemplo.mx'`);
@@ -266,6 +292,9 @@ describe.skipIf(!URL)('flujo completo', () => {
     expect(r.statusCode).toBe(403);
     const ok = await app.inject({ method: 'PUT', url: '/api/ajustes', payload: { nota: { subtitulo: 'Nota', contacto: [], agradecimiento: 'Gracias', lema: '' } }, headers: { cookie: cookieOp } });
     expect(ok.statusCode).toBe(200);
+    // En el calendario ve que el dueño está ocupado, no su agenda personal
+    const cal = await app.inject({ method: 'GET', url: '/api/calendario?desde=2026-12-01&hasta=2026-12-31&fresco=1', headers: { cookie: cookieOp } });
+    expect(cal.json().eventos[0]).toMatchObject({ titulo: 'Ocupado', enlace: null, ubicacion: null });
   });
 
   it('existe el PDF en disco', () => {

@@ -8,6 +8,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import type { Ctx } from './context.js';
+import { calendarioRoutes } from './routes/calendario.js';
 import { ajustesRoutes } from './routes/ajustes.js';
 import { authRoutes } from './routes/auth.js';
 import { conversacionesRoutes } from './routes/conversaciones.js';
@@ -69,6 +70,7 @@ export async function buildApp(ctx: Ctx, opts: { logger?: boolean } = {}): Promi
   await app.register(async (s) => conversacionesRoutes(s, ctx));
   await app.register(async (s) => pedidosRoutes(s, ctx));
   await app.register(async (s) => ajustesRoutes(s, ctx));
+  await app.register(async (s) => calendarioRoutes(s, ctx));
   await app.register(async (s) => publicoRoutes(s, ctx));
   await app.register(async (s) => webhookRoutes(s, ctx));
 

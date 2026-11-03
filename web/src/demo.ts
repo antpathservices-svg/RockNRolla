@@ -19,7 +19,7 @@ import {
   type Pastel,
   type Pedido,
 } from '@rnr/shared';
-import type { Ajustes, Api, PedidoDetalle, PedidoFila, PedidoPatch } from './api';
+import type { Ajustes, Api, EventoGoogle, PedidoDetalle, PedidoFila, PedidoPatch } from './api';
 import { ApiError } from './api';
 
 const NB = ' ';
@@ -175,6 +175,12 @@ function fila(p: PedidoDetalle): PedidoFila {
 }
 
 // ---- Datos de ejemplo ----
+/** Otros eventos del calendario de Google del dueño (no son pedidos). */
+const EVENTOS_DEMO: EventoGoogle[] = [
+  { id: 'g1', titulo: 'Compra de insumos', fecha: fechaMasDias(2), fechaFin: fechaMasDias(2), horaDesde: '09:00', horaHasta: '10:30', todoElDia: false, enlace: null, ubicacion: null },
+  { id: 'g2', titulo: 'Expo pasteles', fecha: fechaMasDias(8), fechaFin: fechaMasDias(9), horaDesde: null, horaHasta: null, todoElDia: true, enlace: null, ubicacion: null },
+  { id: 'g3', titulo: 'Junta con proveedor', fecha: fechaMasDias(-3), fechaFin: fechaMasDias(-3), horaDesde: '18:00', horaHasta: '19:00', todoElDia: false, enlace: null, ubicacion: null },
+];
 importar(`20/10/2026, 6:12${NB}p.${NB}m. - Cliente Nuevo: Hola, quería informes para un pastel`, 'texto');
 const convId = importar(CHAT_EJEMPLO, 'archivo'); // queda primero en la bandeja
 const dias = (n: number) => fechaMasDias(n);
@@ -306,6 +312,22 @@ export const demoApi: Api = {
   notaPreviewUrl: () => null,
   ajustes: () => pausa(AJUSTES),
   async guardarAjustes(patch) { Object.assign(AJUSTES, patch); return pausa(AJUSTES); },
+  async calendario(desde, hasta) {
+    const enRango = (f: string | null) => Boolean(f && f >= desde && f <= hasta);
+    return pausa({
+      desde, hasta,
+      google: { estado: 'conectado' as const, error: null },
+      pedidos: pedidos.filter((p) => p.estado !== 'cancelado' && enRango(p.fechaEntrega)).map((p) => ({
+        ...fila(p), horaHasta: p.horaHasta, direccion: p.direccion,
+        sincronizacion: p.estado === 'cotizando' ? 'no_aplica' as const : p.eventoCalendarioId ? 'conectado' as const : 'pendiente' as const,
+      })),
+      eventos: EVENTOS_DEMO.filter((e) => e.fechaFin >= desde && e.fecha <= hasta),
+    });
+  },
+  async sincronizarCalendario() {
+    for (const p of pedidos) if (!['cotizando', 'cancelado'].includes(p.estado)) p.eventoCalendarioId ??= 'demo';
+    return pausa({ encolados: pedidos.length });
+  },
   conexiones: () => pausa({
     whatsapp: { estado: 'modo_prueba' as const, webhook: 'https://rnr.antpath.mx/webhook/whatsapp' },
     claude: { estado: 'sin_configurar' as const, modelo: 'claude-sonnet-5-5' },

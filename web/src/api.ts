@@ -64,6 +64,34 @@ export interface Conexiones {
   ultimoRespaldo: string | null;
 }
 
+export interface EventoGoogle {
+  id: string;
+  titulo: string;
+  fecha: string;
+  fechaFin: string;
+  horaDesde: string | null;
+  horaHasta: string | null;
+  todoElDia: boolean;
+  enlace: string | null;
+  ubicacion: string | null;
+}
+
+export type Sincronizacion = 'conectado' | 'pendiente' | 'no_aplica';
+export interface PedidoCalendario extends PedidoFila {
+  horaHasta: string | null;
+  direccion: string | null;
+  sincronizacion: Sincronizacion;
+}
+
+export interface VistaCalendario {
+  desde: string;
+  hasta: string;
+  google: { estado: 'conectado' | 'sin_configurar' | 'error'; error: string | null };
+  pedidos: PedidoCalendario[];
+  /** Eventos de Google que no son pedidos de la plataforma */
+  eventos: EventoGoogle[];
+}
+
 export interface PublicoPedido {
   folio: string;
   estado: Estado;
@@ -118,6 +146,8 @@ export interface Api {
   notaPreviewUrl(id: string): string | null;
   ajustes(): Promise<Ajustes>;
   guardarAjustes(patch: Partial<Ajustes>): Promise<Ajustes>;
+  calendario(desde: string, hasta: string, fresco?: boolean): Promise<VistaCalendario>;
+  sincronizarCalendario(desde: string, hasta: string): Promise<{ encolados: number }>;
   conexiones(): Promise<Conexiones>;
   probarConexion(nombre: string): Promise<{ ok: boolean; error?: string }>;
   usuarios(): Promise<Array<{ id: number; email: string; nombre: string | null; rol: 'dueno' | 'operador'; activo: boolean }>>;
@@ -187,6 +217,8 @@ export const httpApi: Api = {
   notaPreviewUrl: (id) => `/api/pedidos/${id}/nota-preview`,
   ajustes: () => http('GET', '/api/ajustes'),
   guardarAjustes: (patch) => http('PUT', '/api/ajustes', patch),
+  calendario: (desde, hasta, fresco) => http('GET', `/api/calendario${qs({ desde, hasta, fresco: fresco ? '1' : undefined })}`),
+  sincronizarCalendario: (desde, hasta) => http('POST', '/api/calendario/sincronizar', { desde, hasta }),
   conexiones: () => http('GET', '/api/conexiones'),
   probarConexion: (n) => http('POST', `/api/conexiones/${n}/probar`),
   usuarios: () => http('GET', '/api/usuarios'),
