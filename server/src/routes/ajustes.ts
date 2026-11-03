@@ -63,7 +63,13 @@ export async function ajustesRoutes(app: FastifyInstance, ctx: Ctx) {
       openrouter: { estado: estado(has.openrouter(config)), modelo: config.OPENROUTER_MODEL, permiteGuardarDatos: config.OPENROUTER_DATA_COLLECTION === 'allow' },
       // Orden en que se usan los modelos: el primero es el principal; el segundo, el respaldo
       modelos: ctx.extractor.proveedores.map((p) => p.nombre),
-      calendario: { estado: estado(has.calendar(config)), calendarioId: config.GOOGLE_CALENDAR_ID ? '(configurado)' : null },
+      calendario: {
+        estado: ctx.calendario.disponible ? 'conectado' : ctx.calendario.error ? ('error' as EstadoConexion) : 'sin_configurar',
+        calendarioId: config.GOOGLE_CALENDAR_ID ? '(configurado)' : null,
+        // El correo de la cuenta de servicio no es secreto: el dueño lo necesita para compartir el calendario.
+        cuenta: ctx.calendario.cuenta,
+        error: ctx.calendario.error,
+      },
       login: { estado: estado(has.googleLogin(config)) },
       ultimoRespaldo,
     };

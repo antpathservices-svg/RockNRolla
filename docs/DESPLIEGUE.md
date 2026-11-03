@@ -43,7 +43,17 @@ Agrega 2 GB de swap en el VPS como colchón (`fallocate -l 2G /swapfile`, etc.).
 3. El dueño abre Google Calendar › configuración de su calendario › Compartir con personas específicas ›
    el correo de la cuenta de servicio con permiso **Hacer cambios en eventos**.
 4. `GOOGLE_SERVICE_ACCOUNT_JSON` (el JSON o el JSON en base64) y `GOOGLE_CALENDAR_ID` (normalmente el correo del dueño).
-5. En el panel: Configuración › Google Calendar › Probar conexión.
+5. En el panel: Configuración › Google Calendar › Probar conexión. La prueba crea y borra un evento de
+   todo el día, así que también comprueba el permiso para hacer cambios.
+
+Notas:
+- Recomendado: un calendario exclusivo "Pedidos Rock N Rolla". Entonces `GOOGLE_CALENDAR_ID` es su ID
+  (configuración del calendario › Integrar el calendario), no el correo.
+- La tarjeta de Configuración muestra el correo de la cuenta de servicio con un botón para copiarlo, y el
+  motivo exacto si la llave está mal pegada, falta el ID o falta compartir.
+- Al arrancar, los pedidos aceptados con fecha de hoy en adelante que aún no tengan evento se agregan solos.
+- Si alguien borra un evento a mano y luego se edita el pedido, el evento se vuelve a crear.
+- Los pedidos de prueba aparecen con "[PRUEBA]" al inicio del título.
 
 ## 4b. Modelos (Claude y OpenRouter)
 

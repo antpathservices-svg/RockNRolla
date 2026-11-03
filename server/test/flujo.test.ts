@@ -64,8 +64,10 @@ describe.skipIf(!URL)('flujo completo', () => {
 
   const calendario: Calendario = {
     disponible: true,
+    cuenta: 'prueba@proyecto.iam.gserviceaccount.com',
+    error: null,
     async crear(p) { eventos.push(`crear ${p.folio}`); return 'evt-1'; },
-    async actualizar(id) { eventos.push(`actualizar ${id}`); },
+    async actualizar(id) { eventos.push(`actualizar ${id}`); return id; },
     async borrar(id) { eventos.push(`borrar ${id}`); },
     async probar() {},
   };
