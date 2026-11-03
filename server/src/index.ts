@@ -21,6 +21,9 @@ if (config.OWNER_EMAIL) {
   );
 }
 
+// Una lectura con IA que estaba corriendo cuando se apagó el servidor ya no va a terminar.
+await db.query("update conversaciones set lectura_inicio = null, lectura_error = 'Se reinició el servidor mientras se leía el chat. Vuelve a intentarlo.' where lectura_inicio is not null");
+
 const calendario = crearCalendario(config);
 const pdf = new GeneradorPdf(config.STORAGE_DIR);
 

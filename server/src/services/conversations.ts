@@ -97,7 +97,7 @@ export async function listarConversaciones(db: Db, q?: string): Promise<Conversa
     where = `where lower(coalesce(c.cliente_nombre,'')) like $1 or coalesce(c.cliente_telefono,'') like $1`;
   }
   const { rows } = await db.query(
-    `select c.*,
+    `select c.*, ${LEYENDO} as leyendo,
        (select texto from mensajes m where m.conversacion_id = c.id and m.rol <> 'sistema' order by indice desc limit 1) as ultimo_texto,
        (select count(*)::int from mensajes m where m.conversacion_id = c.id and m.rol <> 'sistema') as total,
        p.id as pedido_id, p.estado as pedido_estado
@@ -109,6 +109,37 @@ export async function listarConversaciones(db: Db, q?: string): Promise<Conversa
     params,
   );
   return rows.map((r) => aConversacion(r));
+}
+
+/** Una lectura sin terminar se considera abandonada después de 5 minutos (p. ej. si se reinició el servidor). */
+export const MINUTOS_LECTURA = 5;
+const LEYENDO = `(c.lectura_inicio is not null and c.lectura_inicio > now() - interval '${MINUTOS_LECTURA} minutes')`;
+
+export class LecturaEnCurso extends Error {
+  constructor() {
+    super('Ya se está leyendo este chat con IA. El resultado aparece aquí en cuanto llegue.');
+  }
+}
+
+/**
+ * Marca la conversación como "leyendo" mientras corre `fn`. Si ya hay una lectura en curso,
+ * lanza LecturaEnCurso sin llamar al modelo: así un doble clic o una recarga no pagan dos veces.
+ */
+export async function conLectura<T>(db: Db, id: string, tipo: 'resumen' | 'pedido', fn: () => Promise<T>): Promise<T> {
+  const r = await db.query(
+    `update conversaciones c set lectura_inicio = now(), lectura_tipo = $2, lectura_error = null
+      where id = $1 and not ${LEYENDO} returning id`,
+    [id, tipo],
+  );
+  if (!r.rowCount) throw new LecturaEnCurso();
+  try {
+    const res = await fn();
+    await db.query('update conversaciones set lectura_inicio = null where id = $1', [id]);
+    return res;
+  } catch (e) {
+    await db.query('update conversaciones set lectura_inicio = null, lectura_error = $2 where id = $1', [id, ((e as Error).message ?? 'Error').slice(0, 400)]);
+    throw e;
+  }
 }
 
 function aConversacion(r: Record<string, any>): Conversacion {
@@ -125,13 +156,15 @@ function aConversacion(r: Record<string, any>): Conversacion {
     totalMensajes: r.total ?? undefined,
     pedidoId: r.pedido_id ?? null,
     pedidoEstado: r.pedido_estado ?? null,
+    lectura: r.leyendo ? { tipo: r.lectura_tipo, desde: iso(r.lectura_inicio)! } : null,
+    lecturaError: r.lectura_error ?? null,
     creado: iso(r.creado)!,
   };
 }
 
 export async function getConversacion(db: Db, id: string): Promise<{ conversacion: Conversacion; mensajes: Mensaje[]; extraccion: unknown } | null> {
   const { rows } = await db.query(
-    `select c.*, p.id as pedido_id, p.estado as pedido_estado,
+    `select c.*, ${LEYENDO} as leyendo, p.id as pedido_id, p.estado as pedido_estado,
        (select count(*)::int from mensajes m where m.conversacion_id = c.id and m.rol <> 'sistema') as total
      from conversaciones c
      left join lateral (select id, estado from pedidos where conversacion_id = c.id order by creado desc limit 1) p on true

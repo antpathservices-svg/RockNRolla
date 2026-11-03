@@ -28,6 +28,19 @@ export function Bandeja() {
   }, [q]);
 
   const conv = detalle.data?.conversacion;
+  // La lectura con IA vive en el servidor: tras recargar, el botón sigue bloqueado
+  // y la pantalla consulta cada pocos segundos hasta que llega el resultado.
+  const lectura = conv?.lectura ?? null;
+  const leyendoResumen = trabajando === 'resumen' || lectura?.tipo === 'resumen';
+  const leyendoPedido = trabajando === 'pedido' || lectura?.tipo === 'pedido';
+  const ocupado = trabajando !== null || lectura !== null;
+  const recargarDetalle = detalle.recargar;
+  const recargarLista = lista.recargar;
+  useEffect(() => {
+    if (!lectura) return;
+    const t = setInterval(recargarDetalle, 3000);
+    return () => { clearInterval(t); recargarLista(); };
+  }, [lectura, recargarDetalle, recargarLista]);
 
   async function accion(nombre: string, fn: () => Promise<void>) {
     setTrabajando(nombre);
@@ -35,6 +48,8 @@ export function Bandeja() {
       await fn();
     } catch (e) {
       toast((e as Error).message);
+      // 409: otra pestaña (o esta, antes de recargar) ya está leyendo el chat; mostrar ese estado.
+      detalle.recargar();
     } finally {
       setTrabajando(null);
     }
@@ -45,9 +60,9 @@ export function Bandeja() {
   const accionPrincipal = conv && (conv.pedidoId ? (
     <Link to={`/pedidos/${conv.pedidoId}`} className="btn primario grande">Ver pedido</Link>
   ) : (
-    <button type="button" className="btn primario grande" disabled={trabajando !== null}
+    <button type="button" className="btn primario grande" disabled={ocupado} aria-busy={leyendoPedido}
       onClick={() => accion('pedido', async () => { const r = await api.pedidoDesdeConversacion(conv.id); navigate(`/pedidos/${r.id}`); })}>
-      {trabajando === 'pedido' ? 'Leyendo el chat…' : 'Crear pedido borrador'}
+      {leyendoPedido ? 'Leyendo el chat…' : 'Crear pedido borrador'}
     </button>
   ));
 
@@ -128,12 +143,20 @@ export function Bandeja() {
           <h2>Resumen</h2>
           {conv.resumen ? <p style={{ fontSize: 14, lineHeight: 1.5, color: '#3a3132' }}>{conv.resumen}</p> : (
             <>
-              <p className="muted">Todavía no hay resumen de este chat.</p>
-              <button type="button" className="btn" disabled={trabajando !== null}
+              <p className="muted" role="status">
+                {leyendoResumen ? 'Leyendo el chat con IA. Puedes salir de esta pantalla: el resumen se guarda solo.' : 'Todavía no hay resumen de este chat.'}
+              </p>
+              <button type="button" className="btn" disabled={ocupado} aria-busy={leyendoResumen}
                 onClick={() => accion('resumen', async () => { await api.resumir(conv.id); detalle.recargar(); })}>
-                {trabajando === 'resumen' ? 'Resumiendo…' : 'Resumir con IA'}
+                {leyendoResumen ? 'Resumiendo…' : 'Resumir con IA'}
               </button>
             </>
+          )}
+          {!lectura && trabajando === null && conv.lecturaError && (
+            <div className="aviso rojo" role="alert" style={{ flexDirection: 'column', gap: 4 }}>
+              <strong>El último intento no funcionó</strong>
+              <span>{conv.lecturaError}</span>
+            </div>
           )}
           {conv.dudas.length > 0 && (
             <div className="aviso amarillo" style={{ flexDirection: 'column', gap: 4 }}>
@@ -142,7 +165,7 @@ export function Bandeja() {
             </div>
           )}
           {accionPrincipal}
-          <button type="button" className="btn" disabled={trabajando !== null}
+          <button type="button" className="btn" disabled={ocupado}
             onClick={() => accion('link', async () => {
               const r = await api.linkDesdeConversacion(conv.id);
               if (api.demo) {
@@ -183,7 +206,8 @@ function TabsMovil({ vista, setVista }: { vista: 'chat' | 'resumen'; setVista: (
 function Mensajes({ mensajes }: { mensajes: Mensaje[] }) {
   const caja = useRef<HTMLDivElement>(null);
   // El chat abre en el mensaje más reciente, como en WhatsApp.
-  useEffect(() => { if (caja.current) caja.current.scrollTop = caja.current.scrollHeight; }, [mensajes]);
+  // Solo con mensajes nuevos: las consultas periódicas no deben mover la lectura del usuario.
+  useEffect(() => { if (caja.current) caja.current.scrollTop = caja.current.scrollHeight; }, [mensajes.length]);
   const items = useMemo(() => {
     const out: Array<{ dia?: string; m?: Mensaje }> = [];
     let dia = '';

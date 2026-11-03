@@ -62,6 +62,8 @@ describe.skipIf(!URL)('flujo completo', () => {
   const eventos: string[] = [];
   const eventosGoogle: EventoCalendario[] = [];
   const recibidoPorModelo: string[] = [];
+  let esperaModelo: Promise<void> | null = null;
+  let falloModelo: Error | null = null;
 
   const calendario: Calendario = {
     disponible: true,
@@ -104,6 +106,8 @@ describe.skipIf(!URL)('flujo completo', () => {
         async probar() {},
         async extraer(ms) {
           recibidoPorModelo.push(...ms.map((m) => m.texto));
+          if (esperaModelo) await esperaModelo;
+          if (falloModelo) throw falloModelo;
           return EXTRACCION;
         },
       },
@@ -144,6 +148,38 @@ describe.skipIf(!URL)('flujo completo', () => {
     const c = (await pedir('GET', `/api/conversaciones/${conversacionId}`)).json();
     expect(c.conversacion.esPrueba).toBe(true);
     expect(c.mensajes.some((m: { texto: string }) => m.texto.includes('4111'))).toBe(false);
+  });
+
+  it('una lectura en curso bloquea otra (aunque se recargue la página) y guarda el error', async () => {
+    let soltar!: () => void;
+    esperaModelo = new Promise((r) => (soltar = r));
+    const primero = pedir('POST', `/api/conversaciones/${conversacionId}/resumen`);
+    // Lo que vería la pantalla al recargar: la lectura sigue en curso en el servidor
+    let c: { conversacion: { lectura: { tipo: string } | null; lecturaError: string | null; resumen: string | null } } | null = null;
+    for (let i = 0; i < 50; i++) {
+      c = (await pedir('GET', `/api/conversaciones/${conversacionId}`)).json();
+      if (c!.conversacion.lectura) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(c!.conversacion.lectura?.tipo).toBe('resumen');
+    const otra = await pedir('POST', `/api/conversaciones/${conversacionId}/resumen`);
+    expect(otra.status).toBe(409);
+    expect(otra.json().enCurso).toBe(true);
+    expect((await pedir('POST', `/api/conversaciones/${conversacionId}/pedido`)).status).toBe(409);
+
+    soltar();
+    esperaModelo = null;
+    expect((await primero).status).toBe(200);
+    c = (await pedir('GET', `/api/conversaciones/${conversacionId}`)).json();
+    expect(c!.conversacion.lectura).toBeNull();
+    expect(c!.conversacion.resumen).toBeTruthy();
+
+    falloModelo = new Error('Sin créditos en la cuenta');
+    expect((await pedir('POST', `/api/conversaciones/${conversacionId}/resumen`)).status).toBe(502);
+    falloModelo = null;
+    c = (await pedir('GET', `/api/conversaciones/${conversacionId}`)).json();
+    expect(c!.conversacion.lectura).toBeNull();
+    expect(c!.conversacion.lecturaError).toContain('Sin créditos');
   });
 
   it('crea el pedido borrador con los precios por confirmar', async () => {
