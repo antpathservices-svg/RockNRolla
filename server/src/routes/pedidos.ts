@@ -81,7 +81,7 @@ export async function pedidosRoutes(app: FastifyInstance, ctx: Ctx) {
     const patch = zPedidoPatch.parse(req.body);
     const p = await actualizarPedido(db, req.params.id, patch, yo(req));
     if (!p) return reply.code(404).send({ error: 'No existe el pedido.' });
-    if (p.eventoCalendarioId) await ctx.sincronizarCalendario(p.id);
+    if (p.eventoCalendarioId || !['cotizando', 'cancelado'].includes(p.estado)) await ctx.sincronizarCalendario(p.id);
     return detalle(p);
   });
 

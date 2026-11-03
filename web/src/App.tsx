@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import type { Usuario } from './api';
 import { Bandeja } from './pages/Bandeja';
+import { Calendario } from './pages/Calendario';
 import { Cliente } from './pages/Cliente';
 import { Configuracion } from './pages/Configuracion';
 import { Entrar } from './pages/Entrar';
@@ -22,6 +23,7 @@ export function App() {
         <Route path="prueba" element={<NuevaPrueba />} />
         <Route path="pedidos" element={<Pedidos />} />
         <Route path="pedidos/:id" element={<PedidoPage />} />
+        <Route path="calendario" element={<Calendario />} />
         <Route path="configuracion" element={<Configuracion />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -49,6 +51,7 @@ function Panel() {
           <Icono.chat />Bandeja
         </NavLink>
         <NavLink to="/pedidos" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.lista />Pedidos</NavLink>
+        <NavLink to="/calendario" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.calendario />Calendario</NavLink>
         <NavLink to="/configuracion" className={({ isActive }) => (isActive ? 'activo' : undefined)}><Icono.ajustes />Configuración</NavLink>
         <div className="pie">
           <span>{usuario.nombre ?? usuario.email} · {usuario.rol === 'dueno' ? 'Dueño' : 'Operador'}</span>

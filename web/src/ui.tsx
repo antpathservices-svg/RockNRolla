@@ -20,6 +20,7 @@ export const Icono = {
   foto: () => svg(<><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></>),
   ok: () => svg(<path d="M20 6 9 17l-5-5" />, 32),
   atras: () => svg(<path d="m15 18-6-6 6-6" />, 22),
+  calendario: () => svg(<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></>),
   camara: () => svg(<><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></>, 20),
 };
 
@@ -155,13 +156,18 @@ export function useCarga<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [n, setN] = useState(0);
+  const [cargando, setCargando] = useState(true);
   const recargar = useCallback(() => setN((x) => x + 1), []);
   useEffect(() => {
     let vivo = true;
     setError(null);
-    fn().then((d) => vivo && setData(d)).catch((e: Error) => vivo && setError(e.message));
+    setCargando(true);
+    fn()
+      .then((d) => vivo && setData(d))
+      .catch((e: Error) => vivo && setError(e.message))
+      .finally(() => vivo && setCargando(false));
     return () => { vivo = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, n]);
-  return { data, error, recargar, setData };
+  return { data, error, recargar, setData, cargando };
 }

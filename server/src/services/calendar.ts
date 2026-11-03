@@ -20,6 +20,57 @@ export interface Calendario {
   actualizar(eventId: string, p: Pedido, urlPedido: string): Promise<string>;
   borrar(eventId: string): Promise<void>;
   probar(): Promise<void>;
+  /** Eventos del calendario entre dos fechas (YYYY-MM-DD, ambas incluidas), en hora de Monterrey. */
+  listar(desde: string, hasta: string): Promise<EventoCalendario[]>;
+}
+
+export interface EventoCalendario {
+  id: string;
+  titulo: string;
+  /** Día de inicio en Monterrey */
+  fecha: string;
+  /** Último día que ocupa (igual a fecha si es de un día) */
+  fechaFin: string;
+  horaDesde: string | null;
+  horaHasta: string | null;
+  todoElDia: boolean;
+  /** Si lo creó la plataforma: el pedido al que pertenece */
+  pedidoId: string | null;
+  enlace: string | null;
+  ubicacion: string | null;
+}
+
+/** Fecha y hora de Monterrey (UTC-06:00, sin horario de verano) de un dateTime de Google. */
+function enMonterrey(dateTime: string): { fecha: string; hora: string } {
+  const iso = new Date(Date.parse(dateTime) - 6 * 3600_000).toISOString();
+  return { fecha: iso.slice(0, 10), hora: iso.slice(11, 16) };
+}
+
+function diaAnterior(fecha: string): string {
+  const d = new Date(`${fecha}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export function eventoDesdeGoogle(ev: any): EventoCalendario | null {
+  if (!ev?.id || ev.status === 'cancelled' || !ev.start) return null;
+  const base = {
+    id: String(ev.id),
+    titulo: ev.summary ? String(ev.summary) : '(Sin título)',
+    pedidoId: ev.extendedProperties?.private?.pedidoId ?? null,
+    enlace: ev.htmlLink ?? null,
+    ubicacion: ev.location ?? null,
+  };
+  if (ev.start.date) {
+    const fin = ev.end?.date ? diaAnterior(ev.end.date) : ev.start.date;
+    return { ...base, fecha: ev.start.date, fechaFin: fin < ev.start.date ? ev.start.date : fin, horaDesde: null, horaHasta: null, todoElDia: true };
+  }
+  if (!ev.start.dateTime) return null;
+  const ini = enMonterrey(ev.start.dateTime);
+  const fin = ev.end?.dateTime ? enMonterrey(ev.end.dateTime) : ini;
+  // Un evento que termina justo a medianoche no ocupa el día siguiente
+  const fechaFin = fin.hora === '00:00' && fin.fecha > ini.fecha ? diaAnterior(fin.fecha) : fin.fecha;
+  return { ...base, fecha: ini.fecha, fechaFin, horaDesde: ini.hora, horaHasta: fin.fecha === ini.fecha ? fin.hora : null, todoElDia: false };
 }
 
 const ZONA = 'America/Monterrey';
@@ -199,6 +250,30 @@ export function crearCalendario(config: Config, fetchImpl: typeof fetch = fetch,
       } catch (e) {
         if (!yaNoExiste(e)) throw e; // ya no existe: no es error
       }
+    },
+    async listar(desde, hasta) {
+      const eventos: EventoCalendario[] = [];
+      let pagina: string | undefined;
+      // Hasta 4 páginas de 250: de sobra para un mes de un negocio.
+      for (let i = 0; i < 4; i++) {
+        const q = new URLSearchParams({
+          timeMin: `${desde}T00:00:00-06:00`,
+          timeMax: `${diaSiguiente(hasta)}T00:00:00-06:00`,
+          singleEvents: 'true',
+          orderBy: 'startTime',
+          maxResults: '250',
+          timeZone: ZONA,
+        });
+        if (pagina) q.set('pageToken', pagina);
+        const r = await llamar('GET', `/events?${q}`);
+        for (const ev of r?.items ?? []) {
+          const e = eventoDesdeGoogle(ev);
+          if (e) eventos.push(e);
+        }
+        pagina = r?.nextPageToken;
+        if (!pagina) break;
+      }
+      return eventos;
     },
     async probar() {
       // Crear y borrar un evento comprueba la llave, el ID y el permiso de escritura.
