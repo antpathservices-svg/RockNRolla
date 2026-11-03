@@ -447,7 +447,7 @@ function Referencias({ p, onCambio }: { p: PedidoDetalle; onCambio: () => void }
   return (
     <section className="tarjeta" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <h2>Referencias</h2>
-      {p.referencias.length === 0 ? <p className="small muted">Sin fotos. La nota muestra hasta 2.</p> : (
+      {p.referencias.length === 0 ? <p className="small muted">Sin fotos. La nota muestra hasta 4.</p> : (
         <div className="refs">{p.referencias.map((r, i) => <img key={r.id} src={r.url} alt={`Referencia ${i + 1}`} />)}</div>
       )}
       <label className="btn" style={{ cursor: 'pointer' }}>
