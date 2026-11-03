@@ -311,7 +311,7 @@ export const demoApi: Api = {
     claude: { estado: 'sin_configurar' as const, modelo: 'claude-sonnet-5-5' },
     openrouter: { estado: 'sin_configurar' as const, modelo: 'anthropic/claude-sonnet-5.5', permiteGuardarDatos: false },
     modelos: [],
-    calendario: { estado: 'sin_configurar' as const, calendarioId: null },
+    calendario: { estado: 'sin_configurar' as const, calendarioId: null, cuenta: null, error: null },
     login: { estado: 'conectado' as const },
     ultimoRespaldo: null,
   }),

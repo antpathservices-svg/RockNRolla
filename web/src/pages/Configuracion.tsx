@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import type { PanelCtx } from '../App';
 import type { Ajustes, Conexiones } from '../api';
-import { api, useCarga, useDialogo, useToast } from '../ui';
+import { api, copiar, useCarga, useDialogo, useToast } from '../ui';
 
 const ESTADO_CON: Record<string, { texto: string; clase: string }> = {
   conectado: { texto: 'Configurado', clase: 'listo' },
@@ -153,6 +153,7 @@ export function Configuracion() {
 }
 
 function ConexionesGrid({ c, probando, onProbar }: { c: Conexiones; probando: string | null; onProbar: (n: string) => void }) {
+  const toast = useToast();
   const papel = (n: 'claude' | 'openrouter') => {
     const i = c.modelos.indexOf(n);
     return c.modelos.length > 1 && i >= 0 ? (i === 0 ? ' · principal' : ' · respaldo') : '';
@@ -168,7 +169,14 @@ function ConexionesGrid({ c, probando, onProbar }: { c: Conexiones; probando: st
           : `Modelo ${c.openrouter.modelo}. Solo usa proveedores que no guardan los chats.`
         : 'Opcional: otra vía a los modelos, útil como respaldo si Claude falla o se acaba el saldo.' },
     { id: 'calendario', titulo: 'Google Calendar', estado: c.calendario.estado, probar: c.calendario.estado === 'conectado',
-      texto: 'Comparte tu calendario con la cuenta de servicio, con permiso para hacer cambios en eventos.' },
+      texto: c.calendario.error
+        ? <strong style={{ color: 'var(--rojo)' }}>{c.calendario.error}</strong>
+        : c.calendario.cuenta
+          ? <>Comparte el calendario con <strong>{c.calendario.cuenta}</strong>{' '}
+              <button type="button" className="btn texto" style={{ minHeight: 32, color: 'var(--rosa)' }}
+                onClick={async () => toast(await copiar(c.calendario.cuenta!) ? 'Correo copiado.' : 'No se pudo copiar; selecciónalo a mano.')}>Copiar</button>
+              {' '}con el permiso "Hacer cambios en eventos". Los pedidos aceptados se agregan solos.</>
+          : 'Falta la llave de la cuenta de servicio (GOOGLE_SERVICE_ACCOUNT_JSON) y el ID del calendario.' },
     { id: 'login', titulo: 'Inicio de sesión con Google', estado: c.login.estado, probar: false, texto: 'Solo nombre, correo y perfil.' },
   ];
   return (

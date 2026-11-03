@@ -59,7 +59,7 @@ export interface Conexiones {
   openrouter: { estado: EstadoCon; modelo: string; permiteGuardarDatos: boolean };
   /** Orden de uso: el primero es el principal y el segundo el respaldo. */
   modelos: Array<'claude' | 'openrouter'>;
-  calendario: { estado: EstadoCon; calendarioId: string | null };
+  calendario: { estado: EstadoCon; calendarioId: string | null; cuenta: string | null; error: string | null };
   login: { estado: EstadoCon };
   ultimoRespaldo: string | null;
 }
