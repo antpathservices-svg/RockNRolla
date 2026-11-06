@@ -100,7 +100,7 @@ function nuevoPedido(d: Partial<Pedido>): PedidoDetalle {
     id: uid(), folio: formatFolio(n), estado: 'cotizando', motivoCancelacion: null, conversacionId: null,
     clienteNombre: null, clienteTelefono: null, clienteTipo: null, origen: null, fechaEntrega: null, horaEvento: null,
     horaDesde: null, horaHasta: null, tipoEntrega: null, direccion: null, envioCentavos: 0, descuentoCentavos: 0,
-    anticipoPct: AJUSTES.anticipo_pct, cuentaAnticipo: null, cuentaSaldo: null, anticipoRecibidoEn: null,
+    anticipoPct: AJUSTES.anticipo_pct, anticipoCentavos: null, anticipoIncluyeEnvio: false, pagos: [], cuentaAnticipo: null, cuentaSaldo: null, anticipoRecibidoEn: null,
     vigenciaHasta: fechaMasDias(AJUSTES.vigencia_dias), aprobadoEn: null, eventoCalendarioId: null, tokenPublico: null,
     tokenActivo: false, formularioRecibidoEn: null, esPrueba: true, dudas: [], fuentes: [], pasteles: [pastel({})],
     notas: [], creado: ahora(), actualizado: ahora(), referencias: [], pendientes: [], ...d,
@@ -313,7 +313,20 @@ export const demoApi: Api = {
   async desactivarLink(id) { const p = pedidos.find((x) => x.id === id)!; p.tokenActivo = false; p.tokenPublico = null; },
   async subirReferencia(id, file) {
     const p = pedidos.find((x) => x.id === id)!;
-    p.referencias.push({ id: uid(), url: URL.createObjectURL(file) });
+    const r = { id: uid(), url: URL.createObjectURL(file) };
+    p.referencias.push(r);
+    return pausa(r);
+  },
+  async agregarPago(id, pago) {
+    const p = pedidos.find((x) => x.id === id)!;
+    p.pagos = [...p.pagos, { id: uid(), montoCentavos: pago.montoCentavos, fecha: pago.fecha, cuenta: pago.cuenta ?? null, nota: pago.nota ?? null, usuario: 'demo', creado: ahora() }]
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+    return pausa({ pagos: p.pagos });
+  },
+  async borrarPago(id, pagoId) {
+    const p = pedidos.find((x) => x.id === id)!;
+    p.pagos = p.pagos.filter((x) => x.id !== pagoId);
+    return pausa({ pagos: p.pagos });
   },
   notaPreviewUrl: () => null,
   ajustes: () => pausa(AJUSTES),

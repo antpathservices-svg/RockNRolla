@@ -58,6 +58,9 @@ export function vistaNota(p: Pedido, ajustes: Ajustes, logoDataUri: string, foto
     envioCentavos: p.envioCentavos,
     descuentoCentavos: p.descuentoCentavos,
     anticipoPct: p.anticipoPct,
+    anticipoCentavos: p.anticipoCentavos,
+    anticipoIncluyeEnvio: p.anticipoIncluyeEnvio,
+    pagadoCentavos: (p.pagos ?? []).reduce((s, x) => s + x.montoCentavos, 0),
   });
 
   const personas = ps.length > 1
@@ -120,7 +123,11 @@ export function vistaNota(p: Pedido, ajustes: Ajustes, logoDataUri: string, foto
     costo: formatoPesos(montos.costo - montos.descuento),
     envio: montos.envio ? formatoPesos(montos.envio) : null,
     total: formatoPesos(montos.total),
-    anticipo: formatoPesos(montos.anticipo),
+    // Pago completo: no hay anticipo ni saldo que explicar
+    anticipo: montos.pagoCompleto ? null : formatoPesos(montos.anticipo),
+    anticipo_etiqueta: montos.anticipoPct === 50 && !p.anticipoCentavos ? 'Anticipo' : `Anticipo (${montos.anticipoPct}%)`,
+    pagado: montos.pagado > 0 ? formatoPesos(montos.pagado) : null,
+    pago_completo: montos.pagoCompleto,
     saldo: formatoPesos(montos.saldo),
   };
 }

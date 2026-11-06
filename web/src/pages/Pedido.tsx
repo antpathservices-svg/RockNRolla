@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import type { PanelCtx } from '../App';
-import { calcularMontos, ESTADOS, ETIQUETA_ESTADO, formatoPesos, parsePesos, SIGUIENTE_ESTADO, type Estado, type Mensaje } from '@rnr/shared';
+import { calcularMontos, ESTADOS, ETIQUETA_ESTADO, formatoPesos, parsePesos, porcentajeDeMonto, SIGUIENTE_ESTADO, type Estado, type Mensaje, type Montos, type Pago } from '@rnr/shared';
 import { ApiError, type Ajustes, type PastelEditable, type PedidoDetalle } from '../api';
 import { api, copiar, diaMensaje, EstadoChip, fechaCorta, horaMensaje, hoy, Icono, useAngosto, useCarga, useDialogo, useToast } from '../ui';
 
@@ -33,12 +33,18 @@ export function PedidoPage() {
   );
   const [form, setForm] = useState<Form | null>(null);
   const [sucio, setSucio] = useState(false);
+  // Fotos y pagos se guardan al momento y viven aparte del borrador: agregarlos no debe
+  // reemplazar el formulario con lo último guardado (antes, subir una foto borraba los cambios).
+  const [refs, setRefs] = useState<PedidoDetalle['referencias']>([]);
+  const [pagos, setPagos] = useState<Pago[]>([]);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [linkCliente, setLinkCliente] = useState<string | null>(null);
 
   useEffect(() => {
     if (carga.data) {
       setForm({ ...carga.data, pasteles: carga.data.pasteles.map(({ id: _i, posicion: _p, ...x }) => x) });
+      setRefs(carga.data.referencias);
+      setPagos(carga.data.pagos ?? []);
       setSucio(false);
     }
   }, [carga.data]);
@@ -53,7 +59,9 @@ export function PedidoPage() {
   const montos = useMemo(() => form && calcularMontos({
     preciosCentavos: form.pasteles.map((p) => p.precioCentavos),
     envioCentavos: form.envioCentavos, descuentoCentavos: form.descuentoCentavos, anticipoPct: form.anticipoPct,
-  }), [form]);
+    anticipoCentavos: form.anticipoCentavos, anticipoIncluyeEnvio: form.anticipoIncluyeEnvio,
+    pagadoCentavos: pagos.reduce((t, x) => t + x.montoCentavos, 0),
+  }), [form, pagos]);
 
   if (carga.error) return <main className="contenido"><div className="aviso rojo">{carga.error}</div></main>;
   if (!form || !carga.data || !montos) return <main className="contenido"><div className="cargando">Cargando…</div></main>;
@@ -84,6 +92,7 @@ export function PedidoPage() {
         origen: datos.origen, fechaEntrega: datos.fechaEntrega, horaEvento: datos.horaEvento, horaDesde: datos.horaDesde,
         horaHasta: datos.horaHasta, tipoEntrega: datos.tipoEntrega, direccion: datos.direccion,
         envioCentavos: datos.envioCentavos, descuentoCentavos: datos.descuentoCentavos, anticipoPct: datos.anticipoPct,
+        anticipoCentavos: datos.anticipoCentavos, anticipoIncluyeEnvio: datos.anticipoIncluyeEnvio,
         cuentaAnticipo: datos.cuentaAnticipo, cuentaSaldo: datos.cuentaSaldo, dudas: datos.dudas, pasteles: datos.pasteles,
       });
       carga.setData(r);
@@ -304,8 +313,8 @@ export function PedidoPage() {
             </div>
             <div style={{ height: 1, background: '#e2cf86' }} />
             <div className="linea total"><span>Total</span><strong>{formatoPesos(montos.total)}</strong></div>
-            <div className="linea"><span>Anticipo ({form.anticipoPct}% de los pasteles)</span><strong>{formatoPesos(montos.anticipo)}</strong></div>
-            <div className="linea"><span>Saldo al recibir</span><strong>{formatoPesos(montos.saldo)}</strong></div>
+            <AnticipoLigado montos={montos} form={form} cambiar={cambiar} />
+            <div className="linea"><span>{montos.pagado > 0 ? 'Saldo pendiente' : 'Saldo al recibir'}</span><strong>{formatoPesos(montos.saldo)}</strong></div>
             <div className="grid2" style={{ gap: 8 }}>
               <div className="campo">
                 <label htmlFor="c-ant" style={{ color: 'var(--amarillo-texto)' }}>Cuenta del anticipo</label>
@@ -322,7 +331,15 @@ export function PedidoPage() {
             </div>
           </section>
 
-          <Referencias p={p} onCambio={carga.recargar} />
+          <Pagos pedidoId={p.id} pagos={pagos} setPagos={setPagos} montos={montos} cuentas={cuentas} cuentaAnticipo={form.cuentaAnticipo}
+            onAnticipoCubierto={p.estado === 'cotizando' ? async () => {
+              if (await dialogo.confirmar('Se cubrió el anticipo', 'Pasar a Aceptado', `Con este pago el pedido ${p.folio} tiene su anticipo. ¿Lo pasas a Aceptado? Se agrega al calendario.`)) {
+                if (sucio && !(await guardar())) return;
+                await cambiarEstado('aceptado');
+              }
+            } : undefined} />
+
+          <Referencias pedidoId={p.id} refs={refs} onAgregada={(r) => setRefs((x) => [...x, r])} />
 
           {!angosto && sucio && <button type="button" className="btn grande" disabled={ocupado !== null} onClick={() => guardar()}>{ocupado === 'guardar' ? 'Guardando…' : 'Guardar cambios'}</button>}
           {pendientes.length > 0 && <p id="aprobar-ayuda" className="small" style={{ color: '#6b4e00', fontWeight: 600 }}>{pendientes[0]}</p>}
@@ -442,22 +459,183 @@ function PrecioCampo({ i, x, duda, cita, onCambio, onConfirmar, ocupado }: {
   );
 }
 
-function Referencias({ p, onCambio }: { p: PedidoDetalle; onCambio: () => void }) {
+function Referencias({ pedidoId, refs, onAgregada }: { pedidoId: string; refs: PedidoDetalle['referencias']; onAgregada: (r: { id: string; url: string }) => void }) {
   const toast = useToast();
+  const [subiendo, setSubiendo] = useState(0);
   return (
     <section className="tarjeta" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <h2>Referencias</h2>
-      {p.referencias.length === 0 ? <p className="small muted">Sin fotos. La nota muestra hasta 4.</p> : (
-        <div className="refs">{p.referencias.map((r, i) => <img key={r.id} src={r.url} alt={`Referencia ${i + 1}`} />)}</div>
+      {refs.length === 0 ? <p className="small muted">Sin fotos. La nota muestra hasta 4.</p> : (
+        <div className="refs">{refs.map((r, i) => <img key={r.id} src={r.url} alt={`Referencia ${i + 1}`} />)}</div>
       )}
-      <label className="btn" style={{ cursor: 'pointer' }}>
-        <Icono.camara /> Agregar foto
-        <input type="file" accept="image/*" className="sr" onChange={async (e) => {
-          const f = e.target.files?.[0];
-          if (!f) return;
-          try { await api.subirReferencia(p.id, f); onCambio(); } catch (err) { toast((err as Error).message); }
+      {refs.length > 4 && <p className="small muted">La nota muestra las primeras 4.</p>}
+      <label className="btn" style={{ cursor: 'pointer' }} aria-busy={subiendo > 0}>
+        <Icono.camara /> {subiendo ? `Subiendo ${subiendo === 1 ? 'foto' : `${subiendo} fotos`}…` : 'Agregar fotos'}
+        <input type="file" accept="image/*" multiple className="sr" disabled={subiendo > 0} onChange={async (e) => {
+          const archivos = [...(e.target.files ?? [])];
+          e.target.value = '';
+          if (!archivos.length) return;
+          setSubiendo(archivos.length);
+          // Las fotos se guardan al momento; los cambios sin guardar del formulario se quedan como están.
+          for (const f of archivos) {
+            try { onAgregada(await api.subirReferencia(pedidoId, f)); } catch (err) { toast(`${f.name}: ${(err as Error).message}`); }
+            setSubiendo((n) => n - 1);
+          }
         }} />
       </label>
+    </section>
+  );
+}
+
+/** Anticipo en porcentaje y en pesos: al escribir en uno, el otro se actualiza solo. */
+function AnticipoLigado({ montos, form, cambiar }: { montos: Montos; form: Form; cambiar: (p: Partial<Form>) => void }) {
+  const [editando, setEditando] = useState<'pct' | 'monto' | null>(null);
+  const [pctTxt, setPctTxt] = useState('');
+  const [montoTxt, setMontoTxt] = useState('');
+  const base = montos.baseAnticipo;
+  useEffect(() => {
+    if (editando !== 'pct') setPctTxt(String(montos.anticipoPct));
+    if (editando !== 'monto') setMontoTxt(formatoPesos(montos.anticipo));
+  }, [montos.anticipoPct, montos.anticipo, editando]);
+  const montoEscrito = parsePesos(montoTxt);
+  const excede = editando === 'monto' && montoEscrito != null && montoEscrito > base;
+
+  return (
+    <div className="anticipo" role="group" aria-labelledby="ant-titulo">
+      <div className="linea">
+        <span id="ant-titulo">{montos.pagoCompleto ? 'Pago completo' : 'Anticipo'}</span>
+        <span className="fila" style={{ gap: 6, flexWrap: 'nowrap' }}>
+          <span className="con-sufijo">
+            <input aria-label="Anticipo en porcentaje" inputMode="decimal" value={pctTxt} style={{ width: 64, textAlign: 'right' }}
+              onFocus={() => setEditando('pct')} onBlur={() => setEditando(null)}
+              onChange={(e) => {
+                setPctTxt(e.target.value);
+                const n = Number(e.target.value.replace(',', '.').replace('%', '').trim());
+                if (e.target.value.trim() !== '' && Number.isFinite(n) && n >= 0 && n <= 100) cambiar({ anticipoPct: n, anticipoCentavos: null });
+              }} />
+            <span aria-hidden="true">%</span>
+          </span>
+          <span aria-hidden="true">=</span>
+          <input aria-label="Anticipo en pesos" aria-invalid={excede} inputMode="decimal" value={montoTxt} style={{ width: 104, textAlign: 'right' }}
+            onFocus={() => setEditando('monto')} onBlur={() => setEditando(null)}
+            onChange={(e) => {
+              setMontoTxt(e.target.value);
+              const c = parsePesos(e.target.value);
+              if (c != null && c >= 0) cambiar({ anticipoCentavos: Math.min(c, base), anticipoPct: porcentajeDeMonto(base, c) });
+            }} />
+        </span>
+      </div>
+      <p className="small" style={{ color: excede ? 'var(--rojo)' : 'var(--amarillo-texto)', margin: 0 }}>
+        {excede ? `No puede pasar de ${formatoPesos(base)}.` : `Sobre ${form.anticipoIncluyeEnvio && montos.envio ? 'pasteles + envío' : 'los pasteles'}: ${formatoPesos(base)}`}
+      </p>
+      {montos.envio > 0 && (
+        <label className="fila" style={{ gap: 8, fontSize: 14, flexWrap: 'nowrap', cursor: 'pointer', minHeight: 32 }}>
+          <input type="checkbox" checked={form.anticipoIncluyeEnvio} style={{ width: 20, height: 20 }}
+            onChange={(e) => cambiar({ anticipoIncluyeEnvio: e.target.checked })} />
+          Incluir el envío en el anticipo
+        </label>
+      )}
+      <div className="fila" style={{ gap: 6 }}>
+        <button type="button" className="btn chico" aria-pressed={!montos.pagoCompleto && montos.anticipoPct === 50 && !form.anticipoCentavos}
+          onClick={() => cambiar({ anticipoPct: 50, anticipoCentavos: null })}>50 %</button>
+        <button type="button" className="btn chico" aria-pressed={montos.pagoCompleto}
+          onClick={() => cambiar({ anticipoPct: 100, anticipoCentavos: null, anticipoIncluyeEnvio: true })}>Pago completo con envío</button>
+      </div>
+    </div>
+  );
+}
+
+/** Anticipos y pagos del cliente. Se guardan al registrarlos; no dependen de "Guardar cambios". */
+function Pagos({ pedidoId, pagos, setPagos, montos, cuentas, cuentaAnticipo, onAnticipoCubierto }: {
+  pedidoId: string; pagos: Pago[]; setPagos: (p: Pago[]) => void; montos: Montos; cuentas: string[]; cuentaAnticipo: string | null;
+  onAnticipoCubierto?: () => void;
+}) {
+  const toast = useToast();
+  const dialogo = useDialogo();
+  const [abierto, setAbierto] = useState(false);
+  const [monto, setMonto] = useState('');
+  const [fecha, setFecha] = useState(hoy());
+  const [cuenta, setCuenta] = useState('');
+  const [nota, setNota] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const sugerido = montos.pagado === 0 ? montos.anticipo : Math.max(0, montos.total - montos.pagado);
+
+  function abrir() {
+    setMonto(formatoPesos(sugerido));
+    setFecha(hoy());
+    setCuenta(cuentaAnticipo ?? '');
+    setNota('');
+    setAbierto(true);
+  }
+
+  async function registrar(e: React.FormEvent) {
+    e.preventDefault();
+    const c = parsePesos(monto);
+    if (!c || c <= 0) { toast('Escribe el monto del pago.'); return; }
+    setGuardando(true);
+    try {
+      const antes = montos.pagado;
+      const r = await api.agregarPago(pedidoId, { montoCentavos: c, fecha, cuenta: cuenta || null, nota: nota.trim() || null });
+      setPagos(r.pagos);
+      setAbierto(false);
+      toast(`Pago de ${formatoPesos(c)} registrado.`);
+      if (onAnticipoCubierto && antes < montos.anticipo && antes + c >= montos.anticipo) onAnticipoCubierto();
+    } catch (err) {
+      toast((err as Error).message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function borrar(x: Pago) {
+    if (!(await dialogo.confirmar('Borrar pago', 'Borrar', `¿Borrar el pago de ${formatoPesos(x.montoCentavos)} del ${fechaCorta(x.fecha)}?`))) return;
+    try { setPagos((await api.borrarPago(pedidoId, x.id)).pagos); } catch (err) { toast((err as Error).message); }
+  }
+
+  return (
+    <section className="tarjeta pagos" aria-labelledby="pagos-titulo">
+      <div className="fila" style={{ justifyContent: 'space-between' }}>
+        <h2 id="pagos-titulo">Anticipos y pagos</h2>
+        {montos.pagado > 0 && <span className="small" style={{ fontWeight: 600 }}>Pagado {formatoPesos(montos.pagado)} de {formatoPesos(montos.total)}</span>}
+      </div>
+      {pagos.length === 0 ? <p className="small muted">Todavía no hay pagos registrados.</p> : (
+        <ul>
+          {pagos.map((x) => (
+            <li key={x.id}>
+              <div style={{ minWidth: 0 }}>
+                <strong>{formatoPesos(x.montoCentavos)}</strong> <span className="small muted">· {fechaCorta(x.fecha)}{x.cuenta ? ` · ${x.cuenta}` : ''}</span>
+                {x.nota && <div className="small muted">{x.nota}</div>}
+              </div>
+              <button type="button" className="btn texto" aria-label={`Borrar pago de ${formatoPesos(x.montoCentavos)}`} onClick={() => borrar(x)}>Borrar</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {montos.pagado > 0 && (
+        <p className="small" style={{ margin: 0 }}>
+          {montos.faltaAnticipo > 0 ? <>Falta del anticipo: <strong>{formatoPesos(montos.faltaAnticipo)}</strong> · </> : null}
+          Saldo pendiente: <strong>{formatoPesos(montos.saldo)}</strong>
+        </p>
+      )}
+      {abierto ? (
+        <form onSubmit={registrar} className="grid2" style={{ gap: 8 }}>
+          <div className="campo"><label htmlFor="pago-monto">Monto</label><input id="pago-monto" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} autoFocus /></div>
+          <div className="campo"><label htmlFor="pago-fecha">Fecha</label><input id="pago-fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required /></div>
+          <div className="campo">
+            <label htmlFor="pago-cuenta">Cuenta</label>
+            <select id="pago-cuenta" value={cuenta} onChange={(e) => setCuenta(e.target.value)}>
+              <option value="">Sin indicar</option>{cuentas.map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="campo"><label htmlFor="pago-nota">Nota (opcional)</label><input id="pago-nota" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej. transferencia" /></div>
+          <div className="fila" style={{ gap: 8, gridColumn: '1 / -1' }}>
+            <button type="submit" className="btn primario" disabled={guardando}>{guardando ? 'Guardando…' : 'Registrar pago'}</button>
+            <button type="button" className="btn texto" onClick={() => setAbierto(false)}>Cancelar</button>
+          </div>
+        </form>
+      ) : montos.saldo > 0 || montos.pagado === 0 ? (
+        <button type="button" className="btn" style={{ alignSelf: 'flex-start' }} onClick={abrir}>+ Registrar anticipo o pago</button>
+      ) : <p className="small" style={{ margin: 0, color: 'var(--verde)', fontWeight: 600 }}>Pagado por completo.</p>}
     </section>
   );
 }

@@ -76,6 +76,12 @@ export interface Pedido {
   envioCentavos: number;
   descuentoCentavos: number;
   anticipoPct: number;
+  /** Monto fijo del anticipo; null = se calcula con anticipoPct */
+  anticipoCentavos: number | null;
+  /** El anticipo se calcula sobre pasteles + envío */
+  anticipoIncluyeEnvio: boolean;
+  /** Anticipos y pagos registrados, en orden */
+  pagos: Pago[];
   cuentaAnticipo: string | null;
   cuentaSaldo: string | null;
   anticipoRecibidoEn: string | null;
@@ -92,6 +98,17 @@ export interface Pedido {
   notas: Array<{ version: number; creado: string }>;
   creado: string;
   actualizado: string;
+}
+
+export interface Pago {
+  id: string;
+  montoCentavos: number;
+  /** AAAA-MM-DD */
+  fecha: string;
+  cuenta: string | null;
+  nota: string | null;
+  usuario: string | null;
+  creado: string;
 }
 
 export interface Mensaje {

@@ -111,8 +111,11 @@ export async function listarConversaciones(db: Db, q?: string): Promise<Conversa
   return rows.map((r) => aConversacion(r));
 }
 
-/** Una lectura sin terminar se considera abandonada después de 5 minutos (p. ej. si se reinició el servidor). */
-export const MINUTOS_LECTURA = 5;
+/**
+ * Una lectura sin terminar se considera abandonada después de 15 minutos (p. ej. si se
+ * reinició el servidor). Un chat largo se lee en varias llamadas y puede tardar varios minutos.
+ */
+export const MINUTOS_LECTURA = 15;
 const LEYENDO = `(c.lectura_inicio is not null and c.lectura_inicio > now() - interval '${MINUTOS_LECTURA} minutes')`;
 
 export class LecturaEnCurso extends Error {

@@ -225,6 +225,46 @@ describe.skipIf(!URL)('flujo completo', () => {
     expect(html).toContain('$2,025');
   });
 
+  it('anticipo en pesos o con envío, pago completo y varios pagos en la nota', async () => {
+    const nota = async () => (await pedir('GET', `/api/pedidos/${pedido.id}/nota-preview`)).res.body as string;
+
+    // Anticipo sobre pasteles + envío: 50 % de $3,800
+    let r = await pedir('PATCH', `/api/pedidos/${pedido.id}`, { anticipoIncluyeEnvio: true });
+    expect(r.json()).toMatchObject({ anticipoIncluyeEnvio: true, anticipoCentavos: null });
+    expect(await nota()).toContain('$1,900');
+
+    // Monto fijo de $1,000: la nota dice el porcentaje real
+    r = await pedir('PATCH', `/api/pedidos/${pedido.id}`, { anticipoCentavos: 100000, anticipoPct: 26.32 });
+    let html = await nota();
+    expect(html).toContain('Anticipo (26.32%)');
+    expect(html).toContain('$2,800');
+
+    // Pago completo con envío: sin saldo
+    r = await pedir('PATCH', `/api/pedidos/${pedido.id}`, { anticipoCentavos: null, anticipoPct: 100 });
+    html = await nota();
+    expect(html).toContain('Pago completo');
+    expect(html).not.toMatch(/Saldo<\/span> <b>/);
+
+    // Regreso a la regla original para las demás pruebas
+    await pedir('PATCH', `/api/pedidos/${pedido.id}`, { anticipoPct: 50, anticipoIncluyeEnvio: false });
+
+    // Dos anticipos: la nota muestra lo pagado y el saldo es lo que falta
+    const p1 = await pedir('POST', `/api/pedidos/${pedido.id}/pagos`, { montoCentavos: 100000, fecha: '2026-11-01', cuenta: 'BBVA' });
+    expect(p1.status).toBe(200);
+    const p2 = await pedir('POST', `/api/pedidos/${pedido.id}/pagos`, { montoCentavos: 77500, fecha: '2026-11-03' });
+    expect(p2.json().pagos.map((x: { montoCentavos: number }) => x.montoCentavos)).toEqual([100000, 77500]);
+    html = await nota();
+    expect(html).toContain('Pagado</span> <b>$1,775');
+    expect(html).toContain('Saldo</span> <b>$2,025');
+    expect((await pedir('POST', `/api/pedidos/${pedido.id}/pagos`, { montoCentavos: 0, fecha: '2026-11-03' })).status).toBe(400);
+
+    const sinUno = await pedir('DELETE', `/api/pedidos/${pedido.id}/pagos/${p1.json().pago.id}`);
+    expect(sinUno.json().pagos).toHaveLength(1);
+    expect((await pedir('GET', `/api/pedidos/${pedido.id}`)).json().pagos).toHaveLength(1);
+    const bit = await db.query(`select accion from bitacora where entidad_id = $1 and accion like 'pago_%' order by creado`, [pedido.id]);
+    expect(bit.rows.map((x: { accion: string }) => x.accion)).toEqual(['pago_registrado', 'pago_registrado', 'pago_borrado']);
+  });
+
   it('crea el evento al aceptar y lo borra al cancelar', async () => {
     let r = await pedir('POST', `/api/pedidos/${pedido.id}/estado`, { estado: 'aceptado' });
     expect(r.status).toBe(200);
