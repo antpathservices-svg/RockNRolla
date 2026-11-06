@@ -27,6 +27,9 @@
   pasteles[]              {subtitulo, filas[{etiqueta, valor}]}  un grupo por pastel
   varios_pasteles         true con 2 o más pasteles: los grupos van a dos columnas
   costo, envio, total, anticipo, saldo   montos ya formateados; envio y anticipo son opcionales
+  anticipo_etiqueta       "Anticipo" o "Anticipo (30%)" cuando no es el 50 %
+  pagado                  suma de pagos registrados (opcional); entonces saldo = total − pagado
+  pago_completo           true si el anticipo cubre todo: se muestra "Pago completo" en lugar de anticipo
 
   Colores y medidas en las variables CSS de :root.
 -->
@@ -92,8 +95,8 @@ body{
 
 .refs-caja{ padding:0.1in 0.1in 0.06in; text-align:center; height:100%; }
 .refs{ display:grid; gap:0.06in; height:2.9in; }
-.refs img{ width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; object-position:50% 35%; display:block; }
-.refs.n1{ grid-template-columns:minmax(0, 2.6in); justify-content:center; }
+.refs img{ width:100%; height:100%; min-width:0; min-height:0; object-fit:contain; object-position:center; display:block; }
+.refs.n1{ grid-template-columns:1fr; }
 .refs.n2{ grid-template-columns:1fr 1fr; }
 .refs.n3{ grid-template-columns:1.25fr 1fr; grid-template-rows:1fr 1fr; }
 .refs.n3 img:first-child{ grid-row:1 / span 2; }
@@ -174,8 +177,11 @@ body{
       <div class="monto">{{.}}</div>
       {{/envio}}
       <div class="total"><span class="et">Total</span> {{total}}</div>
-      {{#anticipo}}<div class="pago"><span class="et">Anticipo</span> <b>{{.}}</b></div>{{/anticipo}}
-      {{#saldo}}<div class="pago"><span class="et">Saldo</span> <b>{{.}}</b></div>{{/saldo}}
+      {{#pago_completo}}<div class="pago"><span class="et">Pago completo</span> <b>{{total}}</b></div>{{/pago_completo}}
+      {{#anticipo}}<div class="pago"><span class="et">{{anticipo_etiqueta}}</span> <b>{{.}}</b></div>{{/anticipo}}
+      {{#pagado}}<div class="pago"><span class="et">Pagado</span> <b>{{.}}</b></div>{{/pagado}}
+      {{^pago_completo}}{{#saldo}}<div class="pago"><span class="et">Saldo</span> <b>{{.}}</b></div>{{/saldo}}{{/pago_completo}}
+      {{#pago_completo}}{{#pagado}}<div class="pago"><span class="et">Saldo</span> <b>{{saldo}}</b></div>{{/pagado}}{{/pago_completo}}
     </div>
   </div>
 

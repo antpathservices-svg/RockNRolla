@@ -10,8 +10,11 @@ import {
   actualizarPedido,
   cambiarEstado,
   crearPedido,
+  agregarPago,
+  borrarPago,
   desactivarLink,
   eliminarPedido,
+  zPagoInput,
   ErrorDeNegocio,
   generarLink,
   getPedido,
@@ -196,6 +199,19 @@ export async function pedidosRoutes(app: FastifyInstance, ctx: Ctx) {
   app.delete<{ Params: { id: string } }>('/api/pedidos/:id/link', async (req) => {
     await desactivarLink(db, req.params.id, yo(req));
     return { ok: true };
+  });
+
+  /** Anticipos y pagos: se guardan al momento (no dependen del borrador del formulario). */
+  app.post<{ Params: { id: string } }>('/api/pedidos/:id/pagos', async (req, reply) => {
+    const pago = await agregarPago(db, req.params.id, zPagoInput.parse(req.body), yo(req));
+    if (!pago) return reply.code(404).send({ error: 'No existe el pedido.' });
+    return { pago, pagos: (await getPedido(db, req.params.id))!.pagos };
+  });
+
+  app.delete<{ Params: { id: string; pago: string } }>('/api/pedidos/:id/pagos/:pago', async (req, reply) => {
+    const ok = await borrarPago(db, req.params.id, req.params.pago, yo(req));
+    if (!ok) return reply.code(404).send({ error: 'No existe ese pago.' });
+    return { pagos: (await getPedido(db, req.params.id))!.pagos };
   });
 
   app.post<{ Params: { id: string } }>('/api/pedidos/:id/referencias', async (req, reply) => {

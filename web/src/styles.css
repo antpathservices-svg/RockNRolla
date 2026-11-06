@@ -223,6 +223,13 @@ th:first-child, td:first-child { padding-left: 16px; }
 .costos .linea { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; align-items: center; }
 .costos .linea.total { font-size: 18px; }
 .costos input, .costos select { background: #fffdf2; border-color: #d6c27a; }
+.costos .anticipo { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px dashed #e2cf86; border-bottom: 1px dashed #e2cf86; }
+.con-sufijo { display: inline-flex; align-items: center; gap: 4px; }
+.btn.chico { min-height: 36px; padding: 4px 10px; font-size: 13px; background: #fffdf2; border-color: #d6c27a; }
+.btn.chico[aria-pressed='true'] { background: var(--negro); color: #fff; border-color: var(--negro); }
+.pagos { display: flex; flex-direction: column; gap: 10px; }
+.pagos ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pagos li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--borde); }
 .refs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .refs img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; background: #f0eaeb; }
 

@@ -47,7 +47,7 @@ describe('OpenRouter', () => {
     expect(body.provider).toEqual({ require_parameters: true, data_collection: 'deny' });
     expect(body.messages[0].role).toBe('system');
     // Hora de Monterrey en la transcripción
-    expect(body.messages[1].content).toContain('[0] 2026-10-21 08:34 CLIENTE: Hola');
+    expect(body.messages[1].content).toContain('— 2026-10-21 —\n[0] 08:34 CLIENTE: Hola');
   });
 
   it('acepta el JSON envuelto en ```json', () => {
@@ -179,5 +179,58 @@ describe('Respuesta cortada por el límite de tokens', () => {
     const { f } = fetchFalso({ 'openrouter.ai': [cortada, cortada] });
     const ex = crearExtractor(config({ OPENROUTER_API_KEY: 'k' }), f, () => undefined);
     await expect(ex.extraer(MSGS)).rejects.toThrow('usó 15800 tokens razonando');
+  });
+});
+
+describe('chats largos', () => {
+  const largo = Array.from({ length: 400 }, (_, i) => ({
+    indice: i,
+    rol: (i % 2 ? 'negocio' : 'cliente') as 'cliente' | 'negocio',
+    enviado: new Date(Date.UTC(2026, 9, 1 + Math.floor(i / 40), 15, i % 60)).toISOString(),
+    texto: `Mensaje ${i}: ${'detalle del pastel '.repeat(6)}`,
+    tipo: 'texto',
+  }));
+
+  it('parte el chat sin cortar mensajes, con la parte reciente al final y el día en cada parte', async () => {
+    const { lineasChat, partirChat } = await import('../src/services/extraction.js');
+    const lineas = lineasChat(largo);
+    const partes = partirChat(lineas, 6000);
+    expect(partes.length).toBeGreaterThan(3);
+    expect(partes.flat().filter((l) => !l.startsWith('— '))).toEqual(lineas.filter((l) => !l.startsWith('— ')));
+    for (const p of partes) {
+      expect(p[0].startsWith('— ')).toBe(true);
+      expect(p.join('\n').length).toBeLessThanOrEqual(6000 + 20);
+    }
+    expect(partes.at(-1)!.at(-1)).toContain('[399]');
+  });
+
+  it('lee las partes viejas como notas y arma el pedido con las notas y la parte reciente', async () => {
+    const notas = { status: 200, json: { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ notas: '- Pastel de Cars para 20 [12]' }) }] } };
+    const { lineasChat, partirChat } = await import('../src/services/extraction.js');
+    const nPartes = partirChat(lineasChat(largo), 6000).length;
+    const { f, llamadas } = fetchFalso({ 'api.anthropic.com': [...Array.from({ length: nPartes - 1 }, () => notas), okClaude] });
+    const ex = crearExtractor(config({ ANTHROPIC_API_KEY: 'sk-ant-x', LLM_TRAMO_CARACTERES: '6000' }), f, () => undefined);
+    expect(await ex.extraer(largo)).toEqual(EXT);
+    expect(llamadas).toHaveLength(nPartes);
+    expect(llamadas[0].body.output_config.format.schema.required).toEqual(['notas']);
+    const final = llamadas.at(-1)!.body;
+    expect(final.output_config.format.schema.required).toContain('pasteles');
+    expect(final.system).toContain('Notas de las partes anteriores');
+    expect(final.messages[0].content).toContain('Pastel de Cars para 20 [12]');
+    expect(final.messages[0].content).toContain('[399]');
+    expect(final.messages[0].content).not.toContain('[0] ');
+  });
+
+  it('un chat corto se lee en una sola llamada', async () => {
+    const { f, llamadas } = fetchFalso({ 'api.anthropic.com': [okClaude] });
+    const ex = crearExtractor(config({ ANTHROPIC_API_KEY: 'sk-ant-x' }), f, () => undefined);
+    await ex.extraer(largo.slice(0, 30));
+    expect(llamadas).toHaveLength(1);
+  });
+
+  it('explica cuando el chat no cabe en el modelo', async () => {
+    const { f } = fetchFalso({ 'openrouter.ai': [{ status: 400, text: '{"error":{"message":"This endpoint\'s maximum context length is 8192 tokens"}}' }] });
+    const ex = crearExtractor(config({ OPENROUTER_API_KEY: 'sk-or-x' }), f, () => undefined);
+    await expect(ex.extraer(MSGS)).rejects.toThrow('LLM_TRAMO_CARACTERES');
   });
 });

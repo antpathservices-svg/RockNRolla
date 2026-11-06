@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   calcularMontos,
+  montoDePorcentaje,
+  porcentajeDeMonto,
   fechaMasDias,
   formatFolio,
   formatoPesos,
@@ -112,7 +114,33 @@ describe('tramos y roles', () => {
 describe('montos', () => {
   it('reproduce la nota de Lourdes', () => {
     const m = calcularMontos({ preciosCentavos: [180000, 175000], envioCentavos: 25000, anticipoPct: 50 });
-    expect(m).toEqual({ costo: 355000, descuento: 0, envio: 25000, total: 380000, anticipo: 177500, saldo: 202500 });
+    expect(m).toMatchObject({ costo: 355000, descuento: 0, envio: 25000, total: 380000, anticipo: 177500, saldo: 202500, anticipoPct: 50, pagoCompleto: false });
+  });
+
+  it('el anticipo puede incluir el envío', () => {
+    const m = calcularMontos({ preciosCentavos: [355000], envioCentavos: 25000, anticipoPct: 50, anticipoIncluyeEnvio: true });
+    expect(m).toMatchObject({ baseAnticipo: 380000, anticipo: 190000, saldo: 190000 });
+  });
+
+  it('pago completo con envío deja el saldo en cero', () => {
+    const m = calcularMontos({ preciosCentavos: [355000], envioCentavos: 25000, anticipoPct: 100, anticipoIncluyeEnvio: true });
+    expect(m).toMatchObject({ anticipo: 380000, saldo: 0, pagoCompleto: true });
+    // Sin incluir el envío, el 100 % de los pasteles deja el envío en el saldo
+    expect(calcularMontos({ preciosCentavos: [355000], envioCentavos: 25000, anticipoPct: 100 })).toMatchObject({ anticipo: 355000, saldo: 25000, pagoCompleto: false });
+  });
+
+  it('un monto fijo manda sobre el porcentaje y da el porcentaje real', () => {
+    const m = calcularMontos({ preciosCentavos: [355000], envioCentavos: 25000, anticipoPct: 50, anticipoCentavos: 100000 });
+    expect(m).toMatchObject({ anticipo: 100000, anticipoPct: 28.17, saldo: 280000 });
+    // No puede pasar de su base
+    expect(calcularMontos({ preciosCentavos: [100000], anticipoCentavos: 500000 }).anticipo).toBe(100000);
+  });
+
+  it('con pagos registrados el saldo es lo que falta', () => {
+    const m = calcularMontos({ preciosCentavos: [355000], envioCentavos: 25000, anticipoPct: 50, pagadoCentavos: 100000 });
+    expect(m).toMatchObject({ pagado: 100000, faltaAnticipo: 77500, saldo: 280000 });
+    expect(montoDePorcentaje(380000, 25)).toBe(95000);
+    expect(porcentajeDeMonto(380000, 95000)).toBe(25);
   });
 
   it('reproduce la nota de Mildred', () => {

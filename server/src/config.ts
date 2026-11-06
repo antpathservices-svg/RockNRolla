@@ -39,6 +39,12 @@ const schema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
 
+  // Chats más largos que esto (en caracteres, ~3.5 por token) se leen por partes: las viejas se
+  // resumen en notas y la última va completa. Bájalo si el modelo tiene poco contexto.
+  LLM_TRAMO_CARACTERES: z.coerce.number().int().min(4000).max(400000).default(24000),
+  // Tiempo máximo de espera por cada llamada al modelo
+  LLM_TIMEOUT_SEG: z.coerce.number().int().min(30).max(900).default(240),
+
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   GOOGLE_CALENDAR_ID: z.string().optional(),
 

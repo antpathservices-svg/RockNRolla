@@ -1,4 +1,4 @@
-import type { ChatFormat, ChatSegment, Conversacion, Estado, Mensaje, Pastel, Pedido } from '@rnr/shared';
+import type { ChatFormat, ChatSegment, Conversacion, Estado, Mensaje, Pago, Pastel, Pedido } from '@rnr/shared';
 
 export interface Usuario { email: string; nombre: string | null; rol: 'dueno' | 'operador' }
 export interface SinSesion { google: boolean; dev: boolean }
@@ -144,7 +144,9 @@ export interface Api {
   enviarNota(id: string): Promise<void>;
   generarLink(id: string): Promise<{ url: string }>;
   desactivarLink(id: string): Promise<void>;
-  subirReferencia(id: string, file: File): Promise<void>;
+  subirReferencia(id: string, file: File): Promise<{ id: string; url: string }>;
+  agregarPago(id: string, pago: { montoCentavos: number; fecha: string; cuenta?: string | null; nota?: string | null }): Promise<{ pagos: Pago[] }>;
+  borrarPago(id: string, pagoId: string): Promise<{ pagos: Pago[] }>;
   notaPreviewUrl(id: string): string | null;
   ajustes(): Promise<Ajustes>;
   guardarAjustes(patch: Partial<Ajustes>): Promise<Ajustes>;
@@ -217,6 +219,8 @@ export const httpApi: Api = {
   generarLink: (id) => http('POST', `/api/pedidos/${id}/link`),
   desactivarLink: (id) => http('DELETE', `/api/pedidos/${id}/link`),
   subirReferencia: (id, file) => http('POST', `/api/pedidos/${id}/referencias`, archivo(file)),
+  agregarPago: (id, pago) => http('POST', `/api/pedidos/${id}/pagos`, pago),
+  borrarPago: (id, pagoId) => http('DELETE', `/api/pedidos/${id}/pagos/${pagoId}`),
   notaPreviewUrl: (id) => `/api/pedidos/${id}/nota-preview`,
   ajustes: () => http('GET', '/api/ajustes'),
   guardarAjustes: (patch) => http('PUT', '/api/ajustes', patch),

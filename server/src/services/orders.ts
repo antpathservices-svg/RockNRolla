@@ -9,6 +9,7 @@ import {
   type Estado,
   type Extraccion,
   type Fuente,
+  type Pago,
   type Pastel,
   type Pedido,
 } from '@rnr/shared';
@@ -40,7 +41,19 @@ function rowToPastel(r: Row): Pastel {
   };
 }
 
-function rowToPedido(r: Row, pasteles: Row[], notas: Row[]): Pedido {
+function rowToPago(r: Row): Pago {
+  return {
+    id: r.id,
+    montoCentavos: r.monto_centavos,
+    fecha: r.fecha,
+    cuenta: r.cuenta,
+    nota: r.nota,
+    usuario: r.usuario,
+    creado: iso(r.creado)!,
+  };
+}
+
+function rowToPedido(r: Row, pasteles: Row[], notas: Row[], pagos: Row[] = []): Pedido {
   return {
     id: r.id,
     folio: r.folio,
@@ -60,6 +73,9 @@ function rowToPedido(r: Row, pasteles: Row[], notas: Row[]): Pedido {
     envioCentavos: r.envio_centavos,
     descuentoCentavos: r.descuento_centavos,
     anticipoPct: r.anticipo_pct,
+    anticipoCentavos: r.anticipo_centavos,
+    anticipoIncluyeEnvio: r.anticipo_incluye_envio,
+    pagos: pagos.map(rowToPago),
     cuentaAnticipo: r.cuenta_anticipo,
     cuentaSaldo: r.cuenta_saldo,
     anticipoRecibidoEn: iso(r.anticipo_recibido_en),
@@ -84,7 +100,8 @@ export async function getPedido(db: Pick<Db, 'query'>, id: string): Promise<Pedi
   if (!rows[0]) return null;
   const pasteles = (await db.query('select * from pasteles where pedido_id = $1 order by posicion', [id])).rows;
   const notas = (await db.query('select version, creado from notas where pedido_id = $1 order by version', [id])).rows;
-  return rowToPedido(rows[0], pasteles, notas);
+  const pagos = (await db.query('select * from pagos where pedido_id = $1 order by fecha, creado', [id])).rows;
+  return rowToPedido(rows[0], pasteles, notas, pagos);
 }
 
 export interface FiltrosPedidos {
@@ -205,6 +222,8 @@ export const zPedidoPatch = z
     envioCentavos: z.number().int().min(0),
     descuentoCentavos: z.number().int().min(0),
     anticipoPct: z.number().min(0).max(100),
+    anticipoCentavos: z.number().int().min(0).nullable(),
+    anticipoIncluyeEnvio: z.boolean(),
     cuentaAnticipo: zTexto,
     cuentaSaldo: zTexto,
     dudas: z.array(z.object({ campo: z.string(), motivo: z.string(), mensajeIndice: z.number().int().nullable().optional() })),
@@ -229,6 +248,8 @@ const COLUMNAS: Record<string, string> = {
   envioCentavos: 'envio_centavos',
   descuentoCentavos: 'descuento_centavos',
   anticipoPct: 'anticipo_pct',
+  anticipoCentavos: 'anticipo_centavos',
+  anticipoIncluyeEnvio: 'anticipo_incluye_envio',
   cuentaAnticipo: 'cuenta_anticipo',
   cuentaSaldo: 'cuenta_saldo',
 };
@@ -390,6 +411,38 @@ export async function eliminarPedido(db: Db, id: string, usuario: string): Promi
       folio: p.folio, estado: p.estado, cliente: p.cliente_nombre, fechaEntrega: p.fecha_entrega,
     });
     return { folio: p.folio, archivos: archivos.rows.map((r) => r.archivo) };
+  });
+}
+
+export const zPagoInput = z.object({
+  montoCentavos: z.number().int().positive('El pago debe ser mayor a cero.'),
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD'),
+  cuenta: z.string().trim().max(120).nullish(),
+  nota: z.string().trim().max(300).nullish(),
+});
+
+/** Registra un anticipo o pago. Devuelve null si el pedido no existe. */
+export async function agregarPago(db: Db, pedidoId: string, input: z.infer<typeof zPagoInput>, usuario: string): Promise<Pago | null> {
+  return tx(db, async (c) => {
+    const ped = await c.query('select id from pedidos where id = $1 for update', [pedidoId]);
+    if (!ped.rows[0]) return null;
+    const { rows } = await c.query(
+      'insert into pagos (pedido_id, monto_centavos, fecha, cuenta, nota, usuario) values ($1, $2, $3, $4, $5, $6) returning *',
+      [pedidoId, input.montoCentavos, input.fecha, input.cuenta || null, input.nota || null, usuario],
+    );
+    await c.query('update pedidos set actualizado = now() where id = $1', [pedidoId]);
+    await registrar(c, 'pedido', pedidoId, 'pago_registrado', usuario, { montoCentavos: input.montoCentavos, fecha: input.fecha, cuenta: input.cuenta ?? null });
+    return rowToPago(rows[0]);
+  });
+}
+
+export async function borrarPago(db: Db, pedidoId: string, pagoId: string, usuario: string): Promise<boolean> {
+  return tx(db, async (c) => {
+    const { rows } = await c.query('delete from pagos where id = $1 and pedido_id = $2 returning monto_centavos, fecha', [pagoId, pedidoId]);
+    if (!rows[0]) return false;
+    await c.query('update pedidos set actualizado = now() where id = $1', [pedidoId]);
+    await registrar(c, 'pedido', pedidoId, 'pago_borrado', usuario, { montoCentavos: rows[0].monto_centavos, fecha: rows[0].fecha });
+    return true;
   });
 }
 
